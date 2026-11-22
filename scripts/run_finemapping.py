@@ -954,6 +954,22 @@ def r_runtime_environment(project_root: Path) -> dict[str, str]:
     environment.setdefault("RENV_CONFIG_SYNCHRONIZED_CHECK", "FALSE")
     environment.setdefault("R_MAX_VSIZE", "512Gb")
     if environment.get("GWASFM_IN_CONTAINER") == "1":
+        if Path("/opt/conda/bin").is_dir():
+            cur_path = environment.get("PATH", "")
+            if "/opt/conda/bin" not in cur_path.split(":"):
+                environment["PATH"] = f"/opt/conda/bin:{cur_path}" if cur_path else "/opt/conda/bin"
+        if not environment.get("R_LIBS_USER"):
+            c_lib_root = Path(environment.get("RENV_PATHS_LIBRARY", "/opt/gwasfinemapping-r-lib"))
+            if c_lib_root.is_dir():
+                for pat in ("*/*", "*/*/*", "*/*/*/*", "*/*/*/*/*"):
+                    hits = [
+                        p for p in c_lib_root.glob(pat)
+                        if p.is_dir() and (p / "susieR" / "DESCRIPTION").is_file()
+                    ]
+                    if hits:
+                        environment["R_LIBS_USER"] = str(sorted(hits)[0])
+                        environment["R_PROFILE_USER"] = ""
+                        break
         return environment
     tools_root = Path(
         environment.get(

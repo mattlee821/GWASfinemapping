@@ -106,6 +106,24 @@ gwasfm_activate_runtime() {
 
   if gwasfm_in_container; then
     export GWASFM_IN_CONTAINER=1
+    if [[ -d "/opt/conda/bin" ]]; then
+      case ":${PATH}:" in
+        *":/opt/conda/bin:"*) ;;
+        *) export PATH="/opt/conda/bin:${PATH}" ;;
+      esac
+    fi
+    if [[ -d "/opt/conda/lib/jvm" ]]; then
+      export JAVA_HOME="/opt/conda/lib/jvm"
+    fi
+    export RENV_PATHS_LIBRARY="${RENV_PATHS_LIBRARY:-/opt/gwasfinemapping-r-lib}"
+    if [[ -d "${RENV_PATHS_LIBRARY}" ]]; then
+      local _c_susie=""
+      _c_susie="$(find "${RENV_PATHS_LIBRARY}" -mindepth 2 -maxdepth 6 \( -type d -o -type l \) -name "susieR" 2>/dev/null | head -n 1 || true)"
+      if [[ -n "${_c_susie}" ]]; then
+        export R_LIBS_USER="$(dirname "${_c_susie}")"
+        export R_PROFILE_USER=""
+      fi
+    fi
     return 0
   fi
 

@@ -3,7 +3,8 @@ FROM mambaorg/micromamba:2.0.5
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends procps \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && printf 'export PATH="/opt/conda/bin:${PATH}"\nexport JAVA_HOME="/opt/conda/lib/jvm"\n' > /etc/profile.d/gwasfm-conda.sh
 USER $MAMBA_USER
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1

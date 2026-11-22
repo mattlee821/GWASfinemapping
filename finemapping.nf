@@ -151,12 +151,18 @@ process FINEMAP_LOCUS {
     label 'method_heavy'
     cache false
     cpus {
+        if (!workflow.profile.tokenize(',').contains('slurm')) {
+            return Math.max(1, Math.min(4, Runtime.runtime.availableProcessors()))
+        }
         def base = (mem_gb ?: 16) as Integer
         if (region_type == 'mhc' || base >= 128) return 16
         if (base >= 48) return 8
         return 4
     }
     memory {
+        if (!workflow.profile.tokenize(',').contains('slurm')) {
+            return '6 GB'
+        }
         def base = (mem_gb ?: 16) as Integer
         if (region_type == 'mhc' && base >= 32) base = Math.max(base, 160)
         def mult = task.attempt == 1 ? 1.0 : (task.attempt == 2 ? 1.75 : 2.5)

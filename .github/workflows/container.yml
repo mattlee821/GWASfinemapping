@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, gwasfinemapping]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "README.md"
+      - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - ".github/workflows/container.yml"
@@ -35,7 +40,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Build local amd64 image for test & benchmark gate
         uses: docker/build-push-action@v6
@@ -48,7 +52,7 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Run test suite and offline benchmark inside container
         run: |
-          docker run --rm gwasfinemapping:ci bash -lc "bash scripts/test.sh && bash scripts/benchmark.sh --offline"
+          docker run --rm -e NXF_HOME=/tmp/nxf-home gwasfinemapping:ci bash -c "bash scripts/test.sh && bash scripts/benchmark.sh --offline"
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
         with:
@@ -64,12 +68,12 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=sha
-      - name: Publish multi-arch GHCR image
+      - name: Publish GHCR image (linux/amd64)
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
