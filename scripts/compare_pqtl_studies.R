@@ -156,11 +156,14 @@ pqtl_studies <- c(
   "ferkingstad_2021_34857953",
   "pietzner_2021_34648354",
   "zhang_2022_35501419_EUR",
-  "zhang_2022_35501419_AFR"
+  "zhang_2022_35501419_AFR",
+  "somascan_multisusie_3cohort",
+  "somascan_multisusie_4cohort"
 )
 
 records <- list()
 cis_cache <- list()
+study_cs_sizes <- list()
 
 for (s_id in pqtl_studies) {
   s_path <- file.path(finemap_dir, s_id)
@@ -183,7 +186,8 @@ for (s_id in pqtl_studies) {
     has_cis <- length(cis_loci) > 0L && identical(cis_loci[[1L]]$status, "analyzed")
     loc <- if (has_cis) cis_loci[[1L]] else list()
     m <- loc$methods %||% list()
-    rrss <- m$susie_rrss %||% list()
+    is_msusie <- !is.null(m$multisusie)
+    rrss <- (if (is_msusie) m$multisusie else m$susie_rrss) %||% list()
     rss <- m$susie_rss %||% list()
     crm <- m$carma %||% list()
     pf <- m$polyfun %||% list()
@@ -191,6 +195,38 @@ for (s_id in pqtl_studies) {
 
     rec_key <- paste0(s_id, "/", gid)
     platform <- if (grepl("^sun_2023", s_id)) "Olink_Explore" else "SomaScan_v4"
+
+    rrss_res <- NULL
+    crm_res <- NULL
+    cs_sizes_here <- integer()
+    max_pip_here <- NA_real_
+    if (has_cis) {
+      mdir <- file.path(gd, "methods")
+      rrss_res <- if (is_msusie) {
+        extract_cis_method(load_method_container(mdir, "multisusie", "multisusie"))
+      } else {
+        extract_cis_method(load_method_container(mdir, "susie-rrss", "susie_rrss"))
+      }
+      crm_res <- extract_cis_method(load_method_container(mdir, "carma", "carma"))
+      if (!is.null(rrss_res$credible_sets) && nrow(rrss_res$credible_sets) > 0L) {
+        cs_sizes_here <- as.integer(rrss_res$credible_sets$size)
+        study_cs_sizes[[s_id]] <- c(study_cs_sizes[[s_id]] %||% integer(), cs_sizes_here)
+      }
+      if (!is.null(rrss_res$variants) && "PIP" %in% names(rrss_res$variants) && nrow(rrss_res$variants) > 0L) {
+        max_pip_here <- round(max(as.numeric(rrss_res$variants$PIP), na.rm = TRUE), 4)
+      }
+      cis_cache[[rec_key]] <- list(
+        study_id = s_id,
+        platform = platform,
+        ld_pop = as.character(prov$ld_population %||% ""),
+        gwas_id = gid,
+        uniprot_id = uniprot,
+        gene_symbol = gene_sym,
+        lead_id = as.character(loc$lead_gwas_variant_id %||% ""),
+        rrss = rrss_res,
+        carma = crm_res
+      )
+    }
 
     records[[length(records) + 1L]] <- data.frame(
       study_id = s_id,
@@ -208,37 +244,24 @@ for (s_id in pqtl_studies) {
       lead_variant_grch38 = as.character(loc$lead_gwas_variant_id %||% NA_character_),
       lead_lp = as.numeric(loc$lead_lp %||% cis_meta$max_lp %||% NA_real_),
       pld_r2_0.001 = as.integer(pld_r2[["0.001"]] %||% 0L),
-      rss_cs = if (has_cis) as.integer(rss$credible_sets %||% 0L) else NA_integer_,
+      rss_cs = if (has_cis && !is_msusie) as.integer(rss$credible_sets %||% 0L) else NA_integer_,
       rrss_cs = if (has_cis) as.integer(rrss$credible_sets %||% 0L) else NA_integer_,
+      rrss_single_snp_cs = if (has_cis) sum(cs_sizes_here == 1L) else NA_integer_,
+      rrss_cs_le_5 = if (has_cis) sum(cs_sizes_here <= 5L) else NA_integer_,
+      rrss_median_cs_size = if (length(cs_sizes_here) > 0L) stats::median(cs_sizes_here) else NA_real_,
+      rrss_max_pip = max_pip_here,
       rrss_dropped_cs = if (has_cis) as.integer(rrss$unconverged_cs_dropped %||% 0L) else NA_integer_,
       rrss_converged = if (has_cis) as.logical(rrss$converged %||% NA) else NA,
       rrss_iterations = if (has_cis) as.integer(rrss$iterations %||% NA_integer_) else NA_integer_,
       rrss_max_V = if (has_cis) as.numeric(rrss$max_prior_variance_V %||% NA_real_) else NA_real_,
-      rrss_lambda_bias = if (has_cis) as.numeric(rrss$lambda_bias %||% NA_real_) else NA_real_,
-      rrss_Q_art = if (has_cis) as.numeric(rrss$Q_art %||% NA_real_) else NA_real_,
-      carma_cs = if (has_cis) as.integer(crm$credible_sets %||% 0L) else NA_integer_,
-      carma_outliers = if (has_cis) as.integer(crm$outlier_count %||% 0L) else NA_integer_,
-      polyfun_cs = if (has_cis) as.integer(pf$credible_sets %||% 0L) else NA_integer_,
+      rrss_lambda_bias = if (has_cis && !is_msusie) as.numeric(rrss$lambda_bias %||% NA_real_) else NA_real_,
+      rrss_Q_art = if (has_cis && !is_msusie) as.numeric(rrss$Q_art %||% NA_real_) else NA_real_,
+      carma_cs = if (has_cis && !is_msusie) as.integer(crm$credible_sets %||% 0L) else NA_integer_,
+      carma_outliers = if (has_cis && !is_msusie) as.integer(crm$outlier_count %||% 0L) else NA_integer_,
+      polyfun_cs = if (has_cis && !is_msusie) as.integer(pf$credible_sets %||% 0L) else NA_integer_,
       runtime_seconds = round(as.numeric(prov$runtime_seconds %||% NA_real_), 1),
       stringsAsFactors = FALSE
     )
-
-    if (has_cis) {
-      mdir <- file.path(gd, "methods")
-      rrss_res <- extract_cis_method(load_method_container(mdir, "susie-rrss", "susie_rrss"))
-      crm_res <- extract_cis_method(load_method_container(mdir, "carma", "carma"))
-      cis_cache[[rec_key]] <- list(
-        study_id = s_id,
-        platform = platform,
-        ld_pop = as.character(prov$ld_population %||% ""),
-        gwas_id = gid,
-        uniprot_id = uniprot,
-        gene_symbol = gene_sym,
-        lead_id = as.character(loc$lead_gwas_variant_id %||% ""),
-        rrss = rrss_res,
-        carma = crm_res
-      )
-    }
   }
 }
 
@@ -366,6 +389,8 @@ studies_present <- unique(summary_df$study_id)
 agg_rows <- lapply(studies_present, function(sid) {
   sub <- summary_df[summary_df$study_id == sid, , drop = FALSE]
   act <- sub[sub$cis_variants_matched > 0L, , drop = FALSE]
+  act_cs <- act[!is.na(act$rrss_cs) & act$rrss_cs > 0L, , drop = FALSE]
+  all_sz <- study_cs_sizes[[sid]] %||% integer()
   data.frame(
     study_id = sid,
     platform = sub$platform[[1L]],
@@ -374,8 +399,13 @@ agg_rows <- lapply(studies_present, function(sid) {
     assays_total = nrow(sub),
     cis_activated = nrow(act),
     rss_with_cs = sum(!is.na(act$rss_cs) & act$rss_cs > 0L),
-    rrss_converged = sum(isTRUE_vec <- !is.na(act$rrss_converged) & act$rrss_converged),
-    rrss_with_cs = sum(!is.na(act$rrss_cs) & act$rrss_cs > 0L),
+    rrss_converged = sum(!is.na(act$rrss_converged) & act$rrss_converged),
+    rrss_with_cs = nrow(act_cs),
+    total_rrss_cs = sum(act$rrss_cs, na.rm = TRUE),
+    single_snp_cs = sum(all_sz == 1L),
+    cs_le_5 = sum(all_sz <= 5L),
+    median_cs_size = if (length(all_sz) > 0L) stats::median(all_sz) else NA_real_,
+    median_max_pip = if (nrow(act_cs) > 0L) round(stats::median(act_cs$rrss_max_pip, na.rm = TRUE), 4) else NA_real_,
     carma_with_cs = sum(!is.na(act$carma_cs) & act$carma_cs > 0L),
     polyfun_with_cs = sum(!is.na(act$polyfun_cs) & act$polyfun_cs > 0L),
     loci_max_V_gt_1 = sum(!is.na(act$rrss_max_V) & act$rrss_max_V > 1.0),
