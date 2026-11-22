@@ -10,6 +10,10 @@ edit_uri: edit/main/docs/
 exclude_docs: |
   papers/
 
+plugins:
+  - search
+  - callouts
+
 theme:
   name: material
   features:
@@ -40,7 +44,6 @@ theme:
 markdown_extensions:
   - admonition
   - attr_list
-  - callouts
   - def_list
   - footnotes
   - md_in_html
