@@ -987,8 +987,12 @@ def r_runtime_environment(project_root: Path) -> dict[str, str]:
 
 
 def write_lifted_vcf(records: list[dict[str, Any]], lifter: Any,
-                     output_path: Path) -> tuple[dict[str, dict[str, Any]],
-                                                list[dict[str, Any]]]:
+                     output_path: Path,
+                     expected_chrom: str | None = None,
+                     valid_contigs: set[str] | None = None,
+                     ) -> tuple[dict[str, dict[str, Any]],
+                                list[dict[str, Any]]]:
+    expected_norm = normalize_chromosome(expected_chrom) if expected_chrom else None
     lifted_by_id: dict[str, dict[str, Any]] = {}
     excluded = []
     eligible = []
@@ -997,6 +1001,20 @@ def write_lifted_vcf(records: list[dict[str, Any]], lifter: Any,
         lifted, reason = map_variant(lifter, record)
         if reason:
             excluded.append({**record, "status": "excluded", "reason": reason})
+            continue
+        if expected_norm is not None and lifted["LD_CHROM"] != expected_norm:
+            excluded.append({
+                **lifted,
+                "status": "excluded",
+                "reason": "lifted_to_different_chromosome",
+            })
+            continue
+        if valid_contigs is not None and lifted["LD_CHROM"] not in valid_contigs:
+            excluded.append({
+                **lifted,
+                "status": "excluded",
+                "reason": "lifted_contig_absent_from_fasta",
+            })
             continue
         values = [record.get(field) for field in ("ES", "SE", "LP", "SS")]
         if any(value is None for value in values[:3]) or (values[1] is not None and values[1] <= 0):
@@ -1076,15 +1094,25 @@ def normalize_lifted_vcf(vcf: Path, fasta: Path,
         norm_input = vcf
         if fai_map:
             adjusted_vcf = Path(directory) / "pre_norm.vcf"
+            written_records = 0
             with fasta.open("rb") as fasta_fh, vcf.open("r", encoding="utf-8") as src, adjusted_vcf.open("w", encoding="utf-8") as dst:
                 for line in src:
                     if line.startswith("#"):
+                        if line.startswith("##contig=<ID="):
+                            contig_id = line[len("##contig=<ID="):].split(">", 1)[0].split(",", 1)[0]
+                            if contig_id not in fai_map:
+                                continue
                         dst.write(line)
                         continue
                     cols = line.rstrip("\n").split("\t")
                     chrom, pos_s, uid, ref, alt = cols[0], cols[1], cols[2], cols[3], cols[4]
-                    if len(ref) != len(alt) and chrom in fai_map:
-                        pos_i = int(pos_s)
+                    if chrom not in fai_map:
+                        continue
+                    pos_i = int(pos_s)
+                    seq_len = fai_map[chrom][0]
+                    if pos_i < 1 or pos_i > seq_len:
+                        continue
+                    if len(ref) != len(alt):
                         max_l = max(len(ref), len(alt))
                         ref_seq = _fetch_fasta_bases(fasta_fh, fai_map[chrom], pos_i, max_l)
                         if ref_seq and not ref_seq.startswith(ref) and ref_seq.startswith(alt):
@@ -1092,6 +1120,9 @@ def normalize_lifted_vcf(vcf: Path, fasta: Path,
                             pre_swapped_ids.add(uid)
                             line = "\t".join(cols) + "\n"
                     dst.write(line)
+                    written_records += 1
+            if written_records == 0:
+                return []
             norm_input = adjusted_vcf
 
         normalized = Path(directory) / "normalized.vcf"
@@ -1637,7 +1668,9 @@ def analyze_locus(
         d.mkdir(parents=True, exist_ok=True)
 
     lifted_vcf = inputs_dir / "lifted.vcf"
-    lifted_by_id, liftover_excluded = write_lifted_vcf(records, lifter, lifted_vcf)
+    lifted_by_id, liftover_excluded = write_lifted_vcf(
+        records, lifter, lifted_vcf, expected_chrom=chrom
+    )
     if not lifted_by_id:
         reason_counts = dict(Counter(r["reason"] for r in liftover_excluded))
         return {

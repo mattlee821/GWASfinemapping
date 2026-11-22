@@ -58,6 +58,25 @@ class FineMappingTests(unittest.TestCase):
         self.assertEqual(REFERENCE_SAMPLES["EUR"], 420_542)
         self.assertEqual(REFERENCE_SAMPLES["AFR"], 6_637)
 
+    def test_write_lifted_vcf_excludes_unlocalized_random_contigs(self):
+        lifter = StubLifter({
+            ("chr1", 119_800_000): [("chr1", 120_340_000, "+", 1)],
+            ("chr1", 120_500_000): [("chr1_gl000192_random", 501_801, "+", 2)],
+        })
+        records = [
+            {"CHROM": "1", "POS": 119_800_001, "REF": "A", "ALT": "G", "ES": 0.2, "SE": 0.03, "LP": 10.0, "SS": 35000},
+            {"CHROM": "1", "POS": 120_500_001, "REF": "C", "ALT": "T", "ES": 0.1, "SE": 0.04, "LP": 2.0, "SS": 35000},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            vcf_out = Path(tmp) / "lifted.vcf"
+            lifted_by_id, excluded = write_lifted_vcf(records, lifter, vcf_out, expected_chrom="1")
+            self.assertEqual(len(lifted_by_id), 1)
+            self.assertEqual(len(excluded), 1)
+            self.assertEqual(excluded[0]["reason"], "lifted_to_different_chromosome")
+            vcf_txt = vcf_out.read_text(encoding="utf-8")
+            self.assertNotIn("gl000192_random", vcf_txt)
+            self.assertIn("##contig=<ID=1>", vcf_txt)
+
     def test_greedy_kanai_windows_merges_overlapping_3mb_windows_and_clamps_mhc(self):
         records = [
             # Two leads 2.2 Mb apart -> ±1.5 Mb windows [3.5M, 6.5M] and [5.7M, 8.7M] merge!

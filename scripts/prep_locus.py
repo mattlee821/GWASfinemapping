@@ -581,7 +581,9 @@ def prep_locus(args: argparse.Namespace) -> dict[str, Any]:
     lifter = LiftOver(str(chain))
     with tempfile.TemporaryDirectory(prefix=f"gwasfm-lift-{region_id[:20]}-") as lift_tmp:
         lifted_vcf_path = outdir / "lifted.grch37.vcf" if args.keep_intermediates else Path(lift_tmp) / "lifted.vcf"
-        lifted_by_id, liftover_excluded = write_lifted_vcf(records, lifter, lifted_vcf_path)
+        lifted_by_id, liftover_excluded = write_lifted_vcf(
+            records, lifter, lifted_vcf_path, expected_chrom=chrom
+        )
         norm_tsv_out = outdir / "normalized.grch37.tsv" if args.keep_intermediates else None
         normalized = normalize_lifted_vcf(lifted_vcf_path, fasta, norm_tsv_out) if lifted_by_id else []
     liftover_seconds = round(time.monotonic() - t_lift0, 3)
