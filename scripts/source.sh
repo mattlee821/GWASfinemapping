@@ -24,7 +24,7 @@ source "${_GWASFM_SRC_DIR}/lib/env.sh"
 ROOT_DIR="${GWASFM_ROOT}"
 ENV_FILE="${ROOT_DIR}/.env"
 ENV_TEMPLATE="${ROOT_DIR}/.env.example"
-CONTAINER_DEFAULT="ghcr.io/mattlee821/finemapping:latest"
+CONTAINER_DEFAULT="ghcr.io/mattlee821/gwasfinemapping:latest"
 
 ensure_env_file() {
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -152,6 +152,7 @@ install_python_tools() {
   fi
   PYTHONNOUSERSITE=1 "$python" -m pip install --upgrade pip
   PYTHONNOUSERSITE=1 "$python" -m pip install -r "${ROOT_DIR}/requirements-tools.txt"
+  PYTHONNOUSERSITE=1 "$python" -m pip install --no-deps https://github.com/jordanero/MultiSuSiE/archive/refs/heads/main.zip
 }
 
 install_environment() {

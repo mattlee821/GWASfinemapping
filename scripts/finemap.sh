@@ -43,10 +43,14 @@ Usage:
   bash scripts/finemap.sh [options]
   sbatch scripts/finemap.sh [options]
 
-Inputs (supply one of --input-dir, --manifest, or --vcf):
+Inputs (supply one of --input-dir, --manifest, --vcf, --multisusie-manifest, or --multisusie-studies):
   --input-dir DIR            GWASprocessing root, study standardise/ folder, or single GWAS folder
   --manifest PATH            TSV manifest with 'vcf' or 'gwas_dir' column
   --vcf PATH                 Single GRCh38 GWAS-VCF (.vcf.gz)
+  --multisusie-manifest PATH Opt-in MultiSuSiE grouping TSV (multi-cohort / multi-ancestry cis mode; off by default)
+  --multisusie-studies LIST  Opt-in MultiSuSiE study directories (comma-separated; auto-pairs shared <gwas_id> folders)
+  --group-study-id ID        Output study_id label for MultiSuSiE runs (default: multisusie_<K>cohort)
+  --only-gwas LIST           Optional comma-separated gwas_id or UniProt filter for MultiSuSiE runs
   --outdir DIR               Output directory (default: $GWASFM_WORK_ROOT -> <repo>/finemapping)
   --temp-dir DIR             Scratch/temp root for Nextflow workdirs, run logs, locus matrix.npy, and TMPDIR (default: $GWASFM_TEMP_ROOT)
 
@@ -97,6 +101,10 @@ EOF
 INPUT_DIR=""
 MANIFEST=""
 VCF=""
+MULTISUSIE_MANIFEST=""
+MULTISUSIE_STUDIES=""
+GROUP_STUDY_ID=""
+ONLY_GWAS=""
 OUTDIR="${GWASFM_WORK_ROOT}"
 TEMP_DIR_OPT=""
 ONLY_STUDY=""
@@ -141,6 +149,10 @@ while [[ $# -gt 0 ]]; do
     --input-dir|--input_dir) INPUT_DIR="$2"; shift 2 ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --vcf) VCF="$2"; shift 2 ;;
+    --multisusie-manifest|--multisusie_manifest) MULTISUSIE_MANIFEST="$2"; shift 2 ;;
+    --multisusie-studies|--multisusie_studies) MULTISUSIE_STUDIES="$2"; shift 2 ;;
+    --group-study-id|--group_study_id) GROUP_STUDY_ID="$2"; shift 2 ;;
+    --only-gwas|--only_gwas) ONLY_GWAS="$2"; shift 2 ;;
     --outdir) OUTDIR="$2"; shift 2 ;;
     --temp-dir|--temp_dir) TEMP_DIR_OPT="$2"; shift 2 ;;
     --only-study|--only_study) ONLY_STUDY="$2"; shift 2 ;;
@@ -185,8 +197,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$VCF" && -z "$MANIFEST" && -z "$INPUT_DIR" ]]; then
-  echo "Error: supply one of --input-dir, --manifest, or --vcf." >&2
+if [[ -z "$VCF" && -z "$MANIFEST" && -z "$INPUT_DIR" && -z "$MULTISUSIE_MANIFEST" && -z "$MULTISUSIE_STUDIES" ]]; then
+  echo "Error: supply one of --input-dir, --manifest, --vcf, --multisusie-manifest, or --multisusie-studies." >&2
   usage >&2
   exit 2
 fi
@@ -205,6 +217,16 @@ REF_ROOT="$(resolve_abs "$REF_ROOT")"
 [[ -n "$INPUT_DIR" ]] && INPUT_DIR="$(resolve_abs "$INPUT_DIR")"
 [[ -n "$MANIFEST" ]] && MANIFEST="$(resolve_abs "$MANIFEST")"
 [[ -n "$VCF" ]] && VCF="$(resolve_abs "$VCF")"
+[[ -n "$MULTISUSIE_MANIFEST" ]] && MULTISUSIE_MANIFEST="$(resolve_abs "$MULTISUSIE_MANIFEST")"
+if [[ -n "$MULTISUSIE_STUDIES" ]]; then
+  _ms_resolved=()
+  IFS=',' read -r -a _ms_parts <<< "$MULTISUSIE_STUDIES"
+  for _mp in "${_ms_parts[@]}"; do
+    _mp_trim="$(printf '%s' "$_mp" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -n "$_mp_trim" ]] && _ms_resolved+=("$(resolve_abs "$_mp_trim")")
+  done
+  MULTISUSIE_STUDIES="$(IFS=,; printf '%s' "${_ms_resolved[*]}")"
+fi
 [[ -n "$METADATA" ]] && METADATA="$(resolve_abs "$METADATA")"
 [[ -n "$QC" ]] && QC="$(resolve_abs "$QC")"
 [[ -n "$LOCAL_LD_PANEL" ]] && LOCAL_LD_PANEL="$(resolve_abs "$LOCAL_LD_PANEL")"
@@ -272,54 +294,88 @@ export NXF_OPTS="${NXF_OPTS:--Xms2g -Xmx10g}"
 # Fast preflight path on host: skip Nextflow JVM startup for --dry-run or when all rows are already complete
 SKIP_NXF=0
 if [[ -z "$CONTAINER_ENGINE" && -z "${GWASFM_CONTAINER:-}" ]]; then
-  PREP_CMD=(
-    python3 "${ROOT_DIR}/scripts/prepare_manifest.py" prepare
-    --outdir "$OUTDIR"
-    --state-file "${OUTDIR}/.finemap_state.tsv"
-    --output "${LOG_ROOT}/run_manifest.tsv"
-    --summary "${LOG_ROOT}/run_manifest_summary.json"
-    --rows-dir "${LOG_ROOT}/rows"
-    --chain "$CHAIN"
-    --grch37-fasta "$FASTA"
-    --cache-dir "${GWASFM_CACHE_DIR}"
-    --population "$LD_POP"
-    --methods "$METHODS_SPEC"
-    --output-format "$OUTPUT_FORMAT"
-    --significance-lp "${SIG_LP:-7.301029995664}"
-    --min-maf "$MIN_MAF"
-    --region-flank-bp "${FLANK_BP:-1500000}"
-    --max-region-width-bp 9500000
-    --gene-window-bp 1000000
-    --exclude-mhc "$EXCLUDE_MHC"
-    --max-loci "${MAX_LOCI:-0}"
-    --max-causal 10
-    --max-iter "$MAX_ITER"
-    --cis-max-iter "$CIS_MAX_ITER"
-    --susie-refine "$SUSIE_REFINE"
-    --row-limit "$ROW_LIMIT"
-    --force "$FORCE"
-    --dry-run "$DRY_RUN"
-    --report "$REPORT"
-    --keep-intermediates "$KEEP_INTERMEDIATES"
-    --allow-ancestry-mismatch "$ALLOW_ANC_MISMATCH"
-  )
-  [[ -f "$GENE_ANNOT" ]] && PREP_CMD+=(--gene-annotation "$GENE_ANNOT")
-  [[ -d "$PANUKB_DIR" ]] && PREP_CMD+=(--panukb-dir "$PANUKB_DIR")
-  [[ -n "$POLYFUN_DIR" ]] && PREP_CMD+=(--polyfun-dir "$POLYFUN_DIR")
-  [[ -n "$INPUT_DIR" ]] && PREP_CMD+=(--input-dir "$INPUT_DIR")
-  [[ -n "$MANIFEST" ]] && PREP_CMD+=(--manifest "$MANIFEST")
-  [[ -n "$VCF" ]] && PREP_CMD+=(--vcf "$VCF")
-  [[ -n "$ONLY_STUDY" ]] && PREP_CMD+=(--only-study "$ONLY_STUDY")
-  [[ -n "$STUDY_ID" ]] && PREP_CMD+=(--study-id "$STUDY_ID")
-  [[ -n "$GWAS_ID" ]] && PREP_CMD+=(--gwas-id "$GWAS_ID")
-  [[ -n "$METADATA" ]] && PREP_CMD+=(--metadata "$METADATA")
-  [[ -n "$QC" ]] && PREP_CMD+=(--qc "$QC")
-  [[ -n "$TRAIT" ]] && PREP_CMD+=(--trait "$TRAIT")
-  [[ -n "$ANCESTRY" ]] && PREP_CMD+=(--ancestry "$ANCESTRY")
-  [[ -n "$GENE_ID" ]] && PREP_CMD+=(--gene-id "$GENE_ID")
-  [[ -n "$CIS_SIG_LP" ]] && PREP_CMD+=(--cis-significance-lp "$CIS_SIG_LP")
-  [[ -n "$LOCAL_LD_PANEL" ]] && PREP_CMD+=(--local-ld-panel "$LOCAL_LD_PANEL")
-  [[ -n "$BM_PATH" ]] && PREP_CMD+=(--bm-path "$BM_PATH")
+  if [[ -n "$MULTISUSIE_MANIFEST" || -n "$MULTISUSIE_STUDIES" ]]; then
+    PREP_CMD=(
+      python3 "${ROOT_DIR}/scripts/run_multisusie.py" prepare
+      --outdir "$OUTDIR"
+      --state-file "${OUTDIR}/.finemap_state.tsv"
+      --output "${LOG_ROOT}/run_manifest.tsv"
+      --summary "${LOG_ROOT}/run_manifest_summary.json"
+      --rows-dir "${LOG_ROOT}/rows"
+      --chain "$CHAIN"
+      --grch37-fasta "$FASTA"
+      --cache-dir "${GWASFM_CACHE_DIR}"
+      --population "$LD_POP"
+      --output-format "$OUTPUT_FORMAT"
+      --compress "$COMPRESS_MODE"
+      --min-maf "$MIN_MAF"
+      --gene-window-bp 1000000
+      --max-causal 10
+      --cis-max-iter "$CIS_MAX_ITER"
+      --cis-significance-lp "${CIS_SIG_LP:-0}"
+      --row-limit "$ROW_LIMIT"
+      --force "$FORCE"
+      --dry-run "$DRY_RUN"
+      --report "$REPORT"
+    )
+    [[ -f "$GENE_ANNOT" ]] && PREP_CMD+=(--gene-annotation "$GENE_ANNOT")
+    [[ -d "$PANUKB_DIR" ]] && PREP_CMD+=(--panukb-dir "$PANUKB_DIR")
+    [[ -n "$MULTISUSIE_MANIFEST" ]] && PREP_CMD+=(--multisusie-manifest "$MULTISUSIE_MANIFEST")
+    [[ -n "$MULTISUSIE_STUDIES" ]] && PREP_CMD+=(--multisusie-studies "$MULTISUSIE_STUDIES")
+    [[ -n "$GROUP_STUDY_ID" ]] && PREP_CMD+=(--group-study-id "$GROUP_STUDY_ID")
+    [[ -n "$ONLY_GWAS" ]] && PREP_CMD+=(--only-gwas "$ONLY_GWAS")
+    [[ -n "$LOCAL_LD_PANEL" ]] && PREP_CMD+=(--local-ld-panel "$LOCAL_LD_PANEL")
+    [[ -n "$BM_PATH" ]] && PREP_CMD+=(--bm-path "$BM_PATH")
+  else
+    PREP_CMD=(
+      python3 "${ROOT_DIR}/scripts/prepare_manifest.py" prepare
+      --outdir "$OUTDIR"
+      --state-file "${OUTDIR}/.finemap_state.tsv"
+      --output "${LOG_ROOT}/run_manifest.tsv"
+      --summary "${LOG_ROOT}/run_manifest_summary.json"
+      --rows-dir "${LOG_ROOT}/rows"
+      --chain "$CHAIN"
+      --grch37-fasta "$FASTA"
+      --cache-dir "${GWASFM_CACHE_DIR}"
+      --population "$LD_POP"
+      --methods "$METHODS_SPEC"
+      --output-format "$OUTPUT_FORMAT"
+      --significance-lp "${SIG_LP:-7.301029995664}"
+      --min-maf "$MIN_MAF"
+      --region-flank-bp "${FLANK_BP:-1500000}"
+      --max-region-width-bp 9500000
+      --gene-window-bp 1000000
+      --exclude-mhc "$EXCLUDE_MHC"
+      --max-loci "${MAX_LOCI:-0}"
+      --max-causal 10
+      --max-iter "$MAX_ITER"
+      --cis-max-iter "$CIS_MAX_ITER"
+      --susie-refine "$SUSIE_REFINE"
+      --row-limit "$ROW_LIMIT"
+      --force "$FORCE"
+      --dry-run "$DRY_RUN"
+      --report "$REPORT"
+      --keep-intermediates "$KEEP_INTERMEDIATES"
+      --allow-ancestry-mismatch "$ALLOW_ANC_MISMATCH"
+    )
+    [[ -f "$GENE_ANNOT" ]] && PREP_CMD+=(--gene-annotation "$GENE_ANNOT")
+    [[ -d "$PANUKB_DIR" ]] && PREP_CMD+=(--panukb-dir "$PANUKB_DIR")
+    [[ -n "$POLYFUN_DIR" ]] && PREP_CMD+=(--polyfun-dir "$POLYFUN_DIR")
+    [[ -n "$INPUT_DIR" ]] && PREP_CMD+=(--input-dir "$INPUT_DIR")
+    [[ -n "$MANIFEST" ]] && PREP_CMD+=(--manifest "$MANIFEST")
+    [[ -n "$VCF" ]] && PREP_CMD+=(--vcf "$VCF")
+    [[ -n "$ONLY_STUDY" ]] && PREP_CMD+=(--only-study "$ONLY_STUDY")
+    [[ -n "$STUDY_ID" ]] && PREP_CMD+=(--study-id "$STUDY_ID")
+    [[ -n "$GWAS_ID" ]] && PREP_CMD+=(--gwas-id "$GWAS_ID")
+    [[ -n "$METADATA" ]] && PREP_CMD+=(--metadata "$METADATA")
+    [[ -n "$QC" ]] && PREP_CMD+=(--qc "$QC")
+    [[ -n "$TRAIT" ]] && PREP_CMD+=(--trait "$TRAIT")
+    [[ -n "$ANCESTRY" ]] && PREP_CMD+=(--ancestry "$ANCESTRY")
+    [[ -n "$GENE_ID" ]] && PREP_CMD+=(--gene-id "$GENE_ID")
+    [[ -n "$CIS_SIG_LP" ]] && PREP_CMD+=(--cis-significance-lp "$CIS_SIG_LP")
+    [[ -n "$LOCAL_LD_PANEL" ]] && PREP_CMD+=(--local-ld-panel "$LOCAL_LD_PANEL")
+    [[ -n "$BM_PATH" ]] && PREP_CMD+=(--bm-path "$BM_PATH")
+  fi
 
   if "${PREP_CMD[@]}" >/dev/null 2>&1; then
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -374,6 +430,10 @@ NF_CMD=(
 [[ -n "$INPUT_DIR" ]] && NF_CMD+=(--input_dir "$INPUT_DIR")
 [[ -n "$MANIFEST" ]] && NF_CMD+=(--manifest "$MANIFEST")
 [[ -n "$VCF" ]] && NF_CMD+=(--vcf "$VCF")
+[[ -n "$MULTISUSIE_MANIFEST" ]] && NF_CMD+=(--multisusie_manifest "$MULTISUSIE_MANIFEST")
+[[ -n "$MULTISUSIE_STUDIES" ]] && NF_CMD+=(--multisusie_studies "$MULTISUSIE_STUDIES")
+[[ -n "$GROUP_STUDY_ID" ]] && NF_CMD+=(--group_study_id "$GROUP_STUDY_ID")
+[[ -n "$ONLY_GWAS" ]] && NF_CMD+=(--only_gwas "$ONLY_GWAS")
 [[ -n "$ONLY_STUDY" ]] && NF_CMD+=(--only_study "$ONLY_STUDY")
 [[ -n "$STUDY_ID" ]] && NF_CMD+=(--study_id "$STUDY_ID")
 [[ -n "$GWAS_ID" ]] && NF_CMD+=(--gwas_id "$GWAS_ID")

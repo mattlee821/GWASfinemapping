@@ -194,7 +194,57 @@ Cells report `lead_LP : rRSS_CS / CARMA_CS (rRSS_converged)`, `no_cis (max_LP)` 
 
 ---
 
-## 4. Practical Recommendations for Downstream CRC Genetic Analyses
+## 4. Multi-Cohort / Multi-Ancestry Joint SomaScan Fine-Mapping (`MultiSuSiE`)
 
-1. **Primary pQTL Instrument & Colocalisation Source:** Use **`sun_2023_37794186_EUR`** (`SuSiE-rRSS` credible sets and `fit$lbf_variable[fit$sets$cs_index, ]`, supplemented by `CARMA` for `C1QA`) as the primary cis-pQTL reference across all 28 proteins, with **`pietzner_2021_34648354`** (UK `EUR`), **`zhang_2022_35501419_EUR`**, and **`zhang_2022_35501419_AFR`** providing orthogonal SomaScan cross-platform and cross-ancestry validation for the 12 replicating cis-pQTLs.
-2. **Multi-Ancestry Outcome Colocalisation (e.g. `Huyghe 2021` CRC `noUKB`):** Because `Huyghe noUKB` lacks `AFR` cohorts and exhibits modest cis-window $|Z| \approx 1.5\text{–}6.5$ (so $|\Delta r \cdot Z| < 1$), pairing `sun_2023_37794186_EUR` `SuSiE-rRSS` log-BF vectors with either `SuSiE-rRSS` (`eb_mix` + two-tier gate) or LD-free Wakefield ABFs (`coloc.bf_bf`, Wallace 2021) on CRC avoids any cross-ancestry prior-variance inflation.
+Rather than pooling SomaScan summary statistics via fixed-effect IVW meta-analysis (which creates per-SNP sample-size steps across `±1 Mb` WGS/array vs. `±500 kb` cis-only cohorts and distorts single-panel LD), we implemented joint multi-cohort / multi-ancestry Bayesian fine-mapping via **`MultiSuSiE` (`multisusie_rss`, 64-bit)** in [run_multisusie_somascan.py](../scripts/run_multisusie_somascan.py) and [save_multisusie_rda.R](../scripts/save_multisusie_rda.R). Each cohort retains its own sample size $N_k$, per-allele `(ES, SE, AF)` statistics, and ancestry-matched LD panel (`Pan-UKB EUR` or `Pan-UKB AFR`), solved with an unconditionally symmetric positive-definite Woodbury kernel $B = I + Q^{1/2} A Q^{1/2}$ ($\lambda_{\min}(B) \ge 1$) and $\sigma^2_k \ge 10^{-2}$ residual-variance floor across all **26** SomaScan target aptamers (no $P \le 5 \times 10^{-8}$ pre-gate), keeping **`sun_2023_37794186_EUR` (Olink)** as an untouched external validation standard.
+
+### 4.1 Resolution & Convergence Across All 8 Study / Model Configurations
+
+| Study / Model | Platform | GWAS / LD | Assays (`cis` Eval) | Conv (`%`) | Assays $\ge 1$ CS | Total CSs | **1-SNP CSs** | **CSs $\le 5$ SNPs** | Median CS Size | Median Max PIP | $V > 1$ Loci |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **`somascan_multisusie_3cohort`** (`Pietzner + Zhang EUR + AFR`) | SomaScan v4 | `EUR+AFR` / `EUR+AFR` | 26 (`26`) | **26 (`100%`)** | **15** | **77** | **30** | **63 (`82%`)** | **2.0** | **1.0000** | **0** |
+| `somascan_multisusie_4cohort` (`+ Ferkingstad` deCODE) | SomaScan v4 | `EUR+AFR` / `EUR+AFR` | 26 (`26`) | 22 (`85%`) | 12 | 69 | 38 | 57 (`83%`) | 1.0 | 1.0000 | 5 |
+| `pietzner_2021_34648354` (single-cohort UK `EUR`) | SomaScan v4 | `EUR` / `EUR` | 26 (`14`) | 14 (`100%`) | 14 | 43 | 14 | 31 (`72%`) | 3.0 | 0.9646 | 0 |
+| `ferkingstad_2021_34857953` (single-cohort Iceland `EUR`) | SomaScan v4 | `EUR` / `EUR` | 26 (`14`) | 11 (`79%`) | 11 | 43 | 24 | 39 (`91%`) | 1.0 | 1.0000 | 5 |
+| `zhang_2022_35501419_EUR` (single-cohort ARIC `EUR`) | SomaScan v4 | `EUR` / `EUR` | 25 (`12`) | 12 (`100%`) | 12 | 26 | 11 | 19 (`73%`) | 2.5 | 0.9970 | 0 |
+| `zhang_2022_35501419_AFR` (single-cohort ARIC `AFR`) | SomaScan v4 | `AFR` / `AFR` | 25 (`10`) | 10 (`100%`) | 10 | 16 | 6 | 12 (`75%`) | 2.5 | 0.9204 | 0 |
+| **`sun_2023_37794186_EUR`** (**Olink Validation Standard**) | Olink PEA | `EUR` / `EUR` | 31 (`31`) | **30 (`97%`)** | **30** (`31` w/ CRM) | **130** | **53** | **91 (`70%`)** | **2.0** | **0.9997** | 2 |
+| `sun_2023_37794186_ALL` (Multi-ancestry mismatch control) | Olink PEA | `ALL` / `EUR` | 31 (`30`) | 23 (`77%`) | 23 | 108 | 64 | 88 (`81%`) | 1.0 | 1.0000 | 9 |
+
+### 4.2 Per-Aptamer Head-to-Head (`Single-Cohort` vs. `MultiSuSiE 3-Cohort & 4-Cohort` + Coloc vs. `Sun EUR` Olink)
+
+| Gene (`Aptamer`) | `Ferkingstad EUR` | `Pietzner EUR` | `Zhang AFR` | **`MultiSuSiE 3-Cohort`** (`Pietz + Z_EUR + Z_AFR`) | `MultiSuSiE 4-Cohort` (`+ Ferk`) | `coloc.susie` $\max PP.H_4$ vs. `Sun EUR` (`Pietz` / **`MS3`** / `MS4`) |
+|---|---|---|---|---|---|---|
+| **CXCL8** (`P10145_3447-64`) | `1 CS [med=113, 1s=0]` | `no_cis (6.1)` | `no_cis (5.1)` | **`2 CS [med=45, 1s=0]` (Rescued!)** | **`3 CS [med=11, 1s=0]`** | `—` / **`0.8891`** / **`0.8890`** |
+| **TFF2** (`Q03403_9191-8`) | `3 CS [med=3, 1s=0]` | `1 CS [med=2, 1s=0]` | `1 CS [med=1, 1s=1]` | **`5 CS [med=2, 1s=1]`** | `8 CS [med=2, 1s=3]` | `0.5385` → **`0.9998`** / **`0.9999`** |
+| **GDF15** (`Q99988_4374-45`) | `8 CS [med=1, 1s=5]` | `3 CS [med=4, 1s=0]` | `2 CS [med=4, 1s=0]` | **`6 CS [med=1, 1s=4]`** | `0 (F)` (`Ferk` drift) | `0.9948` / **`0.9968`** / `—` |
+| **MMP12** (`P39900_4496-60`) | `1 CS [med=1, 1s=1]` | `4 CS [med=3, 1s=0]` | `2 CS [med=2, 1s=1]` | **`6 CS [med=1.5, 1s=3]`** | `0 (F)` (`Ferk` drift) | `0.9988` / **`1.0000`** / `—` |
+| **TNFSF12** (`O43508_5939-42`) | `0 (F)` | `2 CS [med=7, 1s=0]` | `no_cis (6.2)` | **`4 CS [med=2, 1s=2]`** | **`5 CS [med=1, 1s=4]`** | `0.9994` / **`0.9998`** / **`1.0000`** |
+| **TFF3** (`Q07654_4721-54`) | `3 CS [med=2, 1s=1]` | `3 CS [med=3, 1s=0]` | `1 CS [med=2, 1s=0]` | **`5 CS [med=4, 1s=0]`** | **`9 CS [med=1, 1s=7]`** | `0.9919` / **`0.9993`** / **`1.0000`** |
+| **TFF3** (`Q07654_8323-163`) | `1 CS [med=2, 1s=0]` | `3 CS [med=3, 1s=1]` | `no_cis` | **`5 CS [med=2, 1s=1]`** | **`7 CS [med=1, 1s=4]`** | `0.9918` / **`1.0000`** / **`1.0000`** |
+| **TNFRSF6B** (`O95407_5070-76`) | `no_cis (5.7)` | `1 CS [med=20, 1s=0]` | `no_cis (4.1)` | **`2 CS [med=12, 1s=0]`** | **`2 CS [med=9, 1s=1]`** | `0.9901` / **`0.9927`** / `0.9123` |
+| **IL2RA** (`P01589_3151-6`) | `4 CS [med=2, 1s=2]` | `1 CS [med=2, 1s=0]` | `no_cis (4.1)` | **`2 CS [med=9.5, 1s=1]`** | `4 CS [med=7, 1s=1]` | `0.9997` / **`1.0000`** / **`1.0000`** |
+| **MMP7** (`P09237_2789-26`) | `4 CS [med=1, 1s=3]` | `8 CS [med=1, 1s=5]` | `2 CS [med=1, 1s=2]` | **`9 CS [med=1, 1s=5]`** | `10 CS [med=1.5, 1s=5]` | `1.0000` / **`1.0000`** / **`1.0000`** |
+| **TFF1** (`P04155_9185-15`) | `5 CS [med=1, 1s=5]` | `3 CS [med=1, 1s=2]` | `1 CS [med=1, 1s=1]` | **`5 CS [med=1, 1s=3]`** | `0 (F)` (`Ferk` drift) | `1.0000` / **`1.0000`** / `—` |
+| **REG4** (`Q9BYZ8_11102-22`) | `0 (F)` | `3 CS [med=2, 1s=1]` | `2 CS [med=7, 1s=0]` | **`5 CS [med=3, 1s=1]`** | `0 (F)` (`Ferk` drift) | `1.0000` / **`0.9975`** / `—` |
+| **CCL25** (`O15444_2705-5`) | `0 (F)` | `3 CS [med=4, 1s=1]` | `3 CS [med=4, 1s=0]` | **`6 CS [med=1, 1s=4]`** | `2 CS [med=1, 1s=2]` | `0.7541` / `0.6784` / `0.0001` |
+| **CCL7** (`P80098_4886-3`) | `7 CS [med=1, 1s=4]` | `4 CS [med=1, 1s=3]` | `1 CS [med=4, 1s=0]` | **`6 CS [med=1.5, 1s=3]`** | `10 CS [med=1, 1s=8]` | `0.0000` / `0.0035` / `0.0000` |
+| **CCL3** (`P10147_3040-59`) | `6 CS [med=2.5, 1s=3]` | `4 CS [med=4.5, 1s=1]` | `1 CS [med=1, 1s=1]` | **`9 CS [med=4, 1s=2]`** | `8 CS [med=2, 1s=3]` | `0.0039` / `0.4415` / `0.0854` |
+| **CSF1** (`P09603_3738-54`) | `no_cis (3.5)` | `no_cis (3.8)` | `no_cis (2.7)` | `0 (T)` | `1 CS [med=30, 1s=0]` | `—` / `—` / `0.5916` |
+| **10 Other `cis-null` Somamers** | `no_cis` | `no_cis` | `no_cis` | **`0 (T)` on all 10/10** | **`0 (T)` on all 10/10** | `—` (Zero false-positive CSs) |
+
+### 4.3 Key Findings from the `MultiSuSiE` Experiment
+1. **`somascan_multisusie_3cohort` (`Pietzner UK EUR + Zhang US EUR + Zhang US AFR`) substantially improves SomaScan fine-mapping without any calibration loss:**
+   - Achieved **26 / 26 (100%) convergence** and **0** $V > 1$ blow-ups across all 26 aptamers.
+   - **Doubled single-variant (`1-SNP`) credible sets** relative to `Pietzner` alone (**`30` vs. `14`**, $+114\%$) and increased total resolved `cis` credible sets by **$+79\%$ (`77` vs. `43`)**, reducing median CS size from **`3.0` → `2.0`** and lifting median top PIP from **`0.9646` → `1.0000`** (e.g. `GDF15` `0 → 4` single-SNP CSs; `MMP12` `0 → 3` single-SNP CSs; `CCL25` `1 → 4` single-SNP CSs; `TNFSF12` `0 → 2` single-SNP CSs).
+   - **Rescued sub-threshold `CXCL8`** (`Pietzner LP = 6.1`, `Zhang EUR LP = 3.2`, `Zhang AFR LP = 5.1` — none significant individually) into **`2` credible sets that colocalise with `Sun EUR` Olink at $PP.H_4 = 0.8891$**, and **upgraded `TFF2` cross-platform colocalisation with `Sun EUR` Olink from ambiguous (`0.5385` in `Pietzner`) to near-certain (`0.9998`)** by integrating the strong `Zhang AFR` signal (`LP = 50`).
+   - **Zero false positives on null Somamers:** All **11 / 11** cis-null Somamers converged cleanly to `0` credible sets in `3-cohort` (`10 / 11` in `4-cohort`, with `CSF1` detecting 1 broad 30-SNP suggestive signal at $PP.H_4 = 0.5916$).
+2. **Adding deCODE Iceland (`4-cohort`) confirms the founder-LD trade-off:**
+   - Without an in-sample Icelandic LD matrix, adding `Ferkingstad` ($N = 35{,}559$) against UK `Pan-UKB EUR` triggered non-convergence / $V > 1$ inflation on **4** high-$|Z|$ loci (`GDF15`, `MMP12`, `REG4`, `TFF1`), while further narrowing modest-$|Z|$ loci (`CXCL8` `med = 45 → 11`, `TFF3` `med = 4 → 1` with `7` single-SNP CSs, `TNFSF12` `med = 2 → 1` with `4` single-SNP CSs). Thus **`somascan_multisusie_3cohort` is the recommended primary multi-ancestry SomaScan model**.
+
+---
+
+## 5. Practical Recommendations for Downstream CRC Genetic Analyses
+
+1. **Primary pQTL Instrument & Colocalisation Source:** Use **`sun_2023_37794186_EUR`** (`SuSiE-rRSS` credible sets and `fit$lbf_variable[fit$sets$cs_index, ]`, supplemented by `CARMA` for `C1QA`) as the primary cis-pQTL reference across all 28 proteins, paired with **`somascan_multisusie_3cohort`** (`Pietzner EUR + Zhang EUR + Zhang AFR`) as the unified cross-platform, cross-ancestry SomaScan fine-mapping and colocalisation validation set (`100%` convergence, `30` single-SNP CSs, rescuing `CXCL8` and `TFF2`).
+2. **Multi-Ancestry Outcome Colocalisation (e.g. `Huyghe 2021` CRC `noUKB`):** Because `Huyghe noUKB` lacks `AFR` cohorts and exhibits modest cis-window $|Z| \approx 1.5\text{–}6.5$ (so $|\Delta r \cdot Z| < 1$), pairing `sun_2023_37794186_EUR` and `somascan_multisusie_3cohort` log-BF vectors with either `SuSiE-rRSS` (`eb_mix` + two-tier gate) or LD-free Wakefield ABFs (`coloc.bf_bf`, Wallace 2021) on CRC avoids any cross-ancestry prior-variance inflation.

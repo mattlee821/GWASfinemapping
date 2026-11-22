@@ -52,6 +52,7 @@ def collect_runs(outdir: Path) -> list[dict[str, Any]]:
             "cs_rrss": qc.get("total_credible_sets_susie_rrss", 0),
             "cs_carma": qc.get("total_credible_sets_carma", 0),
             "cs_polyfun": qc.get("total_credible_sets_polyfun", 0),
+            "cs_multisusie": qc.get("total_credible_sets_multisusie"),
             "cis_status": (qc.get("cis_gene") or {}).get("status", "not_applicable"),
             "mhc_status": (qc.get("mhc") or {}).get("status", "no_significant_variants"),
             "nonconverged": len(qc.get("nonconverged_regions") or []),
@@ -85,6 +86,11 @@ def render_manifest_html(outdir: Path) -> Path:
         status_cell = badge(str(r["status"]), tone)
         if r.get("ancestry_ld_status") == "multi_ancestry_gwas_single_panel_ld":
             status_cell += " " + badge(f"ALL->{r['ld_pop']} LD", "warn")
+        cs_cell = (
+            f"MultiSuSiE: {int(r['cs_multisusie']):,d}"
+            if r.get("cs_multisusie") is not None
+            else f"{r['cs_rss']:,} / {r['cs_rrss']:,} / {r['cs_carma']:,} / {r['cs_polyfun']:,}"
+        )
         rows_html.append(
             "<tr>"
             f"<td><code>{html.escape(str(r['study_id']))}</code></td>"
@@ -94,7 +100,7 @@ def render_manifest_html(outdir: Path) -> Path:
             f"<td>{status_cell}</td>"
             f"<td class='num'>{r['sig_variants']:,}</td>"
             f"<td class='num'>{r['regions']:,}</td>"
-            f"<td class='num'>{r['cs_rss']:,} / {r['cs_rrss']:,} / {r['cs_carma']:,} / {r['cs_polyfun']:,}</td>"
+            f"<td class='num'>{cs_cell}</td>"
             f"<td><code>{html.escape(str(r['cis_status']))}</code></td>"
             f"<td><code>{html.escape(str(r['mhc_status']))}</code></td>"
             f"<td class='num'>{r['nonconverged']} / {r['mismatch']}</td>"

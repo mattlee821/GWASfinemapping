@@ -1,0 +1,86 @@
+site_name: GWASfinemapping
+site_description: >-
+  High-throughput statistical fine-mapping, LD-based variant prioritisation, and opt-in
+  multi-ancestry MultiSuSiE on standardised GRCh38 GWAS-VCFs using Pan-UKB LD panels.
+site_url: https://mattlee821.github.io/GWASfinemapping/
+repo_url: https://github.com/mattlee821/GWASfinemapping
+repo_name: mattlee821/GWASfinemapping
+edit_uri: edit/main/docs/
+
+exclude_docs: |
+  papers/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - callouts
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_javascript:
+  - javascripts/katex.js
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+
+extra_css:
+  - https://unpkg.com/katex@0/dist/katex.min.css
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Getting Started: getting-started.md
+      - Running Analyses & MultiSuSiE: running-analyses.md
+      - Outputs, Coloc & Interactive R: outputs-and-coloc.md
+  - Methods & Reference:
+      - Statistical Methods & QC: methods.md
+      - Architecture & Contracts: architecture.md
+      - Pan-UKB LD Panels: panukb-ld.md
+      - Reference Data: reference-data.md
+      - Literature Review: literature_review.md
+  - Benchmarks & Reports:
+      - 28-Protein Cross-Platform & MultiSuSiE Study: sun_eur_vs_all_comparison_report.md

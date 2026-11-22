@@ -36,3 +36,5 @@
 ^report-.*\.html$
 ^timeline-.*\.html$
 ^.*\.Rcheck$
+^mkdocs\.yml$
+^site$

@@ -294,53 +294,137 @@ process UPDATE_STATE {
     """
 }
 
+process PREPARE_MULTISUSIE {
+    tag "prepare-multisusie"
+    cache false
+    publishDir "${params.log_root ?: params.outdir}", mode: 'copy', overwrite: true, pattern: 'run_manifest*'
+
+    output:
+    path 'run_manifest.tsv', emit: manifest
+    path 'run_manifest_summary.json', emit: summary
+    path 'rows/*.json', emit: rows, optional: true
+
+    script:
+    """
+    python3 '${projectDir}/scripts/run_multisusie.py' prepare \\
+      ${opt('--multisusie-manifest', params.multisusie_manifest)} \\
+      ${opt('--multisusie-studies', params.multisusie_studies)} \\
+      ${opt('--group-study-id', params.group_study_id)} \\
+      ${opt('--only-gwas', params.only_gwas)} \\
+      --outdir '${params.outdir}' \\
+      --state-file '${params.outdir}/.finemap_state.tsv' \\
+      --output run_manifest.tsv \\
+      --summary run_manifest_summary.json \\
+      --rows-dir rows \\
+      --chain '${params.chain}' \\
+      --grch37-fasta '${params.grch37_fasta}' \\
+      ${opt('--gene-annotation', params.gene_annotation)} \\
+      ${opt('--panukb-dir', params.panukb_dir)} \\
+      ${opt('--local-ld-panel', params.local_ld_panel)} \\
+      ${opt('--bm-path', params.bm_path)} \\
+      --cache-dir '${params.cache_dir}' \\
+      --population '${params.population}' \\
+      --output-format '${params.output_format}' \\
+      --compress '${params.compress}' \\
+      --min-maf '${params.min_maf}' \\
+      --gene-window-bp '${params.gene_window_bp}' \\
+      --max-causal '${params.max_causal}' \\
+      --cis-max-iter '${params.cis_max_iter}' \\
+      ${opt('--cis-significance-lp', params.cis_significance_lp)} \\
+      --row-limit '${params.row_limit}' \\
+      --force '${params.force}' \\
+      --dry-run '${params.dry_run}' \\
+      --report '${params.report}'
+    """
+}
+
+process MULTISUSIE_GROUP {
+    tag "${row_id}"
+    label 'method_heavy'
+    cache false
+    cpus 4
+    memory { "${Math.min(128, 24 * task.attempt)} GB" }
+    time { "${Math.min(24, 6 * task.attempt)}h" }
+    afterScript { "python3 '${projectDir}/scripts/prepare_manifest.py' copy-logs --outdir '${params.outdir}' --row-json '${row_json}' --step-name '03_multisusie' || true" }
+
+    input:
+    tuple val(row_id), path(row_json)
+
+    output:
+    path '*.row_record.json', emit: records
+
+    script:
+    def tmp_export = params.temp_dir ? "mkdir -p '${params.temp_dir}' && export TMPDIR='${params.temp_dir}'" : ""
+    """
+    ${tmp_export}
+    export OPENBLAS_NUM_THREADS='${task.cpus}' OMP_NUM_THREADS='${task.cpus}'
+    python3 '${projectDir}/scripts/run_multisusie.py' run-group \\
+      --row-json '${row_json}' \\
+      --output-record '${row_id}.row_record.json' \\
+      --bm-disk-cache '${params.bm_cache_dir ?: ""}' \\
+      --threads '${task.cpus}' || [ -f '${row_id}.row_record.json' ]
+    python3 '${projectDir}/scripts/prepare_manifest.py' update-state \\
+      --state-file '${params.outdir}/.finemap_state.tsv' \\
+      --records '${row_id}.row_record.json' \\
+      --skip-manifest-report || true
+    """
+}
+
 workflow {
     def ref_required = ['chain', 'grch37_fasta', 'grch37_fai', 'outdir']
     def missing_ref = ref_required.findAll { !params[it] }
     if (missing_ref) {
         error "Missing required parameter(s): ${missing_ref.collect { "--${it}" }.join(', ')}"
     }
-    if (!params.input_dir && !params.manifest && !params.vcf) {
-        error "Supply one of --input_dir <dir>, --manifest <tsv>, or --vcf <path>"
+    def is_multisusie = (params.multisusie_manifest || params.multisusie_studies) as Boolean
+    if (!is_multisusie && !params.input_dir && !params.manifest && !params.vcf) {
+        error "Supply one of --input_dir <dir>, --manifest <tsv>, --vcf <path>, --multisusie_manifest <tsv>, or --multisusie_studies <dirs>"
     }
 
-    def methods_list = parseMethodsList(params.methods as String)
+    if (is_multisusie) {
+        PREPARE_MULTISUSIE()
+        ms_rows_ch = PREPARE_MULTISUSIE.out.rows.flatten().map { rj -> tuple(rj.baseName, rj) }
+        MULTISUSIE_GROUP(ms_rows_ch)
+        UPDATE_STATE(MULTISUSIE_GROUP.out.records.collect().ifEmpty([]))
+    } else {
+        def methods_list = parseMethodsList(params.methods as String)
 
-    PREPARE_MANIFEST()
-    row_files_ch = PREPARE_MANIFEST.out.rows.flatten().map { rj -> tuple(rj.baseName, rj) }
+        PREPARE_MANIFEST()
+        row_files_ch = PREPARE_MANIFEST.out.rows.flatten().map { rj -> tuple(rj.baseName, rj) }
 
-    SCREEN_GWAS(row_files_ch)
+        SCREEN_GWAS(row_files_ch)
 
-    branched_ch = SCREEN_GWAS.out.branch { row_id, row_json, screen_json, loci_tsv ->
-        def lines = loci_tsv.readLines().drop(1).findAll { it.trim() }
-        has_loci: lines.size() > 0
-            return tuple(row_id, row_json, screen_json, lines)
-        zero_loci: true
-            return tuple(row_id, row_json, screen_json, 'NONE')
+        branched_ch = SCREEN_GWAS.out.branch { row_id, row_json, screen_json, loci_tsv ->
+            def lines = loci_tsv.readLines().drop(1).findAll { it.trim() }
+            has_loci: lines.size() > 0
+                return tuple(row_id, row_json, screen_json, lines)
+            zero_loci: true
+                return tuple(row_id, row_json, screen_json, 'NONE')
+        }
+
+        locus_tasks_ch = branched_ch.has_loci.flatMap { row_id, row_json, screen_json, lines ->
+            def n_loci = lines.size()
+            lines.collect { line ->
+                def cols = line.split('\\t')
+                def mem_gb = cols.size() > 3 ? (cols[3] as Integer) : 16
+                tuple(row_id, row_json, screen_json, n_loci, cols[0] as Integer, cols[1], cols[2], mem_gb)
+            }
+        }
+
+        FINEMAP_LOCUS(locus_tasks_ch)
+
+        completed_loci_ch = FINEMAP_LOCUS.out
+            .map { row_id, row_json, screen_json, n_loci, scratch_loci_root ->
+                tuple(groupKey(row_id, n_loci as Integer), row_id, row_json, screen_json, scratch_loci_root)
+            }
+            .groupTuple(by: 0)
+            .map { gwas_gkey, row_ids, row_jsons, screen_jsons, loci_roots ->
+                tuple(row_ids[0], row_jsons[0], screen_jsons[0], loci_roots[0])
+            }
+
+        to_finalise_ch = branched_ch.zero_loci.mix(completed_loci_ch)
+        FINALISE_GWAS(to_finalise_ch)
+
+        UPDATE_STATE(FINALISE_GWAS.out.records.collect().ifEmpty([]))
     }
-
-    locus_tasks_ch = branched_ch.has_loci.flatMap { row_id, row_json, screen_json, lines ->
-        def n_loci = lines.size()
-        lines.collect { line ->
-            def cols = line.split('\\t')
-            def mem_gb = cols.size() > 3 ? (cols[3] as Integer) : 16
-            tuple(row_id, row_json, screen_json, n_loci, cols[0] as Integer, cols[1], cols[2], mem_gb)
-        }
-    }
-
-    FINEMAP_LOCUS(locus_tasks_ch)
-
-    completed_loci_ch = FINEMAP_LOCUS.out
-        .map { row_id, row_json, screen_json, n_loci, scratch_loci_root ->
-            tuple(groupKey(row_id, n_loci as Integer), row_id, row_json, screen_json, scratch_loci_root)
-        }
-        .groupTuple(by: 0)
-        .map { gwas_gkey, row_ids, row_jsons, screen_jsons, loci_roots ->
-            tuple(row_ids[0], row_jsons[0], screen_jsons[0], loci_roots[0])
-        }
-
-    to_finalise_ch = branched_ch.zero_loci.mix(completed_loci_ch)
-    FINALISE_GWAS(to_finalise_ch)
-
-    UPDATE_STATE(FINALISE_GWAS.out.records.collect().ifEmpty([]))
 }

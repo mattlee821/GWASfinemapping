@@ -10,12 +10,12 @@ The review covers the five papers supplied in `docs/papers/`, the primary SuSiE-
 
 | File | Paper |
 |---|---|
-| [2021.09.03.21262975v1.full.pdf](./papers/2021.09.03.21262975v1.full.pdf) | Kanai et al. (2021), “Insights from complex trait fine-mapping across diverse populations,” *medRxiv*, DOI [10.1101/2021.09.03.21262975](https://doi.org/10.1101/2021.09.03.21262975). |
-| [bbag574.pdf](./papers/bbag574.pdf) | Chen et al. (2026), “Systematic benchmarking of multi-ancestry fine-mapping under variant heterogeneity and LD mismatch,” *Briefings in Bioinformatics*, DOI [10.1093/bib/bbag574](https://doi.org/10.1093/bib/bbag574). |
-| [ddaa148.pdf](./papers/ddaa148.pdf) | Hutchinson et al. (2020), “Fine-mapping genetic associations,” *Human Molecular Genetics*, DOI [10.1093/hmg/ddaa148](https://doi.org/10.1093/hmg/ddaa148). |
-| [main.pdf](./papers/main.pdf) | Benner et al. (2017), “Prospects of Fine-Mapping Trait-Associated Genomic Regions by Using Summary Statistics from GWAS,” *The American Journal of Human Genetics* 101:539–551, DOI [10.1016/j.ajhg.2017.08.012](https://doi.org/10.1016/j.ajhg.2017.08.012). |
-| [nihms-2112025.pdf](./papers/nihms-2112025.pdf) | Li and Zhou (2025), “Towards improved fine-mapping of candidate causal variants,” *Nature Reviews Genetics*, DOI [10.1038/s41576-025-00869-4](https://doi.org/10.1038/s41576-025-00869-4). |
-| [nihms976173.pdf](./papers/nihms976173.pdf) | Schaid et al. (2018), “From genome-wide associations to candidate causal variants by statistical fine-mapping,” *Nature Reviews Genetics* 19:491–504, DOI [10.1038/s41576-018-0016-z](https://doi.org/10.1038/s41576-018-0016-z). |
+| `2021.09.03.21262975v1.full.pdf` | Kanai et al. (2021), “Insights from complex trait fine-mapping across diverse populations,” *medRxiv*, DOI [10.1101/2021.09.03.21262975](https://doi.org/10.1101/2021.09.03.21262975). |
+| `bbag574.pdf` | Chen et al. (2026), “Systematic benchmarking of multi-ancestry fine-mapping under variant heterogeneity and LD mismatch,” *Briefings in Bioinformatics*, DOI [10.1093/bib/bbag574](https://doi.org/10.1093/bib/bbag574). |
+| `ddaa148.pdf` | Hutchinson et al. (2020), “Fine-mapping genetic associations,” *Human Molecular Genetics*, DOI [10.1093/hmg/ddaa148](https://doi.org/10.1093/hmg/ddaa148). |
+| `main.pdf` | Benner et al. (2017), “Prospects of Fine-Mapping Trait-Associated Genomic Regions by Using Summary Statistics from GWAS,” *The American Journal of Human Genetics* 101:539–551, DOI [10.1016/j.ajhg.2017.08.012](https://doi.org/10.1016/j.ajhg.2017.08.012). |
+| `nihms-2112025.pdf` | Li and Zhou (2025), “Towards improved fine-mapping of candidate causal variants,” *Nature Reviews Genetics*, DOI [10.1038/s41576-025-00869-4](https://doi.org/10.1038/s41576-025-00869-4). |
+| `nihms976173.pdf` | Schaid et al. (2018), “From genome-wide associations to candidate causal variants by statistical fine-mapping,” *Nature Reviews Genetics* 19:491–504, DOI [10.1038/s41576-018-0016-z](https://doi.org/10.1038/s41576-018-0016-z). |
 
 The complete text of each supplied PDF was reviewed. The supplementary material is not all present in the supplied directory. PMC lists two Benner supplement PDFs and a Schaid DOCX, but their download endpoints returned access interstitials during this review; their contents are therefore **not** represented as reviewed. Chen et al.'s supplementary availability was not verified. These are literature-review limitations, not evidence that supplements do not exist.
 

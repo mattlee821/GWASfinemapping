@@ -10,7 +10,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from run_finemapping import r_runtime_environment  # noqa: E402
-from run_multisusie_somascan import (  # noqa: E402
+from run_multisusie import (  # noqa: E402
     fit_multisusie_locus,
     load_multisusie_backend,
     save_multisusie_study_output,
@@ -181,6 +181,76 @@ class MultiSuSiEIntegrationTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(out["pip"])))
         self.assertTrue(np.all(np.isfinite(out["lbf_variable"])))
         self.assertTrue(np.all(out["sigma2"] >= 1e-2))
+
+    def test_cli_prepare_run_group_and_idempotent_state_skip(self):
+        import json
+        project_root = Path(__file__).resolve().parents[2]
+        r_env = r_runtime_environment(project_root)
+        r_env["PYTHONPATH"] = ":".join(sys.path)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fix = root / "fixture"
+            subprocess.run(
+                [sys.executable, str(project_root / "scripts" / "build_synthetic_fixture.py"), "--out", str(fix)],
+                cwd=project_root, env=r_env, check=True,
+            )
+            # Clone sun_synthetic into two synthetic SomaScan cohorts sharing P00001_olink
+            s1 = root / "gwas" / "cohort_a_EUR" / "standardise"
+            s2 = root / "gwas" / "cohort_b_EUR" / "standardise"
+            shutil.copytree(fix / "gwas" / "sun_synthetic", s1)
+            shutil.copytree(fix / "gwas" / "sun_synthetic", s2)
+
+            outdir = root / "out"
+            logdir = root / "logs"
+            prep_cmd = [
+                sys.executable, str(project_root / "scripts" / "run_multisusie.py"), "prepare",
+                "--multisusie-studies", f"{s1.parent},{s2.parent}",
+                "--group-study-id", "ms_test_2coh",
+                "--outdir", str(outdir),
+                "--state-file", str(outdir / ".finemap_state.tsv"),
+                "--output", str(logdir / "run_manifest.tsv"),
+                "--summary", str(logdir / "run_manifest_summary.json"),
+                "--rows-dir", str(logdir / "rows"),
+                "--chain", str(fix / "reference" / "genome" / "hg38ToHg19.over.chain.gz"),
+                "--grch37-fasta", str(fix / "reference" / "genome" / "GRCh37.fa"),
+                "--gene-annotation", str(fix / "reference" / "annotation" / "gene_regions_GRCh38.tsv"),
+                "--panukb-dir", str(fix / "reference" / "panukb"),
+                "--local-ld-panel", str(fix / "reference" / "local_eur_panel.npz"),
+                "--cache-dir", str(root / "cache"),
+            ]
+            subprocess.run(prep_cmd, cwd=project_root, env=r_env, check=True)
+            s_json = json.loads((logdir / "run_manifest_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(s_json["rows_to_run"], 1)
+
+            row_file = sorted((logdir / "rows").glob("*.json"))[0]
+            rec_file = root / "rec.row_record.json"
+            subprocess.run(
+                [
+                    sys.executable, str(project_root / "scripts" / "run_multisusie.py"), "run-group",
+                    "--row-json", str(row_file),
+                    "--output-record", str(rec_file),
+                ],
+                cwd=project_root, env=r_env, check=True,
+            )
+            self.assertTrue((outdir / "ms_test_2coh" / "P00001_olink" / "methods" / "multisusie.rda").is_file())
+            self.assertTrue((outdir / "ms_test_2coh" / "P00001_olink" / "report.html").is_file())
+
+            subprocess.run(
+                [
+                    sys.executable, str(project_root / "scripts" / "prepare_manifest.py"), "update-state",
+                    "--state-file", str(outdir / ".finemap_state.tsv"),
+                    "--outdir", str(outdir),
+                    "--records", str(rec_file),
+                ],
+                cwd=project_root, env=r_env, check=True,
+            )
+            self.assertTrue((outdir / "manifest.html").is_file())
+
+            # Re-running prepare must skip the already-completed group!
+            subprocess.run(prep_cmd, cwd=project_root, env=r_env, check=True)
+            s_json2 = json.loads((logdir / "run_manifest_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(s_json2["rows_to_run"], 0)
+            self.assertEqual(s_json2["rows_skipped_complete"], 1)
 
 
 if __name__ == "__main__":

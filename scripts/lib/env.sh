@@ -146,7 +146,7 @@ gwasfm_activate_runtime() {
 gwasfm_in_container_exec() {
   gwasfm_resolve_paths
   local engine="${GWASFM_CONTAINER:-apptainer}"
-  local image="${GWASFM_CONTAINER_IMAGE:-${GWASFM_CONTAINER_REF:-ghcr.io/mattlee821/finemapping:latest}}"
+  local image="${GWASFM_CONTAINER_IMAGE:-${GWASFM_CONTAINER_REF:-ghcr.io/mattlee821/gwasfinemapping:latest}}"
   case "$engine" in
     docker)
       docker run --rm \

@@ -30,3 +30,4 @@ references/
 finemapping/
 manifests/*.tsv
 docs/papers/*.pdf
+site/

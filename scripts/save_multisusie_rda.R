@@ -18,6 +18,7 @@ parse_args <- function(args) {
 opts <- parse_args(commandArgs(trailingOnly = TRUE))
 work_dir <- normalizePath(opts$work_dir, mustWork = TRUE)
 out_rda <- opts$output
+out_format <- tolower(opts$format %||% "rda")
 
 meta <- jsonlite::fromJSON(file.path(work_dir, "fit_meta.json"), simplifyVector = FALSE)
 variants <- utils::read.delim(
@@ -164,6 +165,12 @@ method_object <- list(
 )
 
 dir.create(dirname(out_rda), recursive = TRUE, showWarnings = FALSE)
-env_out <- new.env(parent = emptyenv())
-assign("multisusie", method_object, envir = env_out)
-save(list = "multisusie", envir = env_out, file = out_rda, compress = opts$compress)
+stem_path <- sub("\\.(rda|rds)$", "", out_rda, ignore.case = TRUE)
+if (out_format %in% c("rda", "both")) {
+  env_out <- new.env(parent = emptyenv())
+  assign("multisusie", method_object, envir = env_out)
+  save(list = "multisusie", envir = env_out, file = paste0(stem_path, ".rda"), compress = opts$compress)
+}
+if (out_format %in% c("rds", "both")) {
+  saveRDS(method_object, file = paste0(stem_path, ".rds"), compress = opts$compress)
+}

@@ -1,6 +1,6 @@
 # Architecture and data contracts
 
-**Status:** Cascading 4-stage pipeline and all five methods (`p-ld`, `susie-rss`, `susie-rrss`, `carma`, `polyfun`) finalised and benchmarked (18 Nov 2026); targets >10,000-GWAS storage and CPU efficiency, shared per-locus LD preparation, interactive standalone per-method R scripts, evidence-backed region/MHC defaults, idempotent batch execution over `GWASprocessing` outputs, self-contained HTML reporting, and container/SLURM portability. Reusable epidemiological and statistical fine-mapping defaults live in `~/.claude/skills/methods/references/fine-mapping.md`. See [the Pan-UKB LD guide](panukb-ld.md) and [the reference-data guide](reference-data.md).
+**Status:** Cascading 4-stage single-study pipeline (`p-ld`, `susie-rss`, `susie-rrss`, `carma`, `polyfun`) plus opt-in multi-cohort / multi-ancestry `MultiSuSiE` (`--multisusie-studies` / `--multisusie-manifest`) finalised and benchmarked; targets >10,000-GWAS storage and CPU efficiency, shared per-locus LD preparation, interactive standalone per-method R scripts, evidence-backed region/MHC defaults, idempotent batch execution over `GWASprocessing` outputs, self-contained HTML reporting, and container/SLURM portability. See [Statistical Methods & QC](methods.md), [the Pan-UKB LD guide](panukb-ld.md), and [the reference-data guide](reference-data.md).
 
 ## System boundaries & cascading DAG
 

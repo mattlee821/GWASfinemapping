@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 390" role="img" aria-label="Sun UKB-PPP Olink vs SomaScan v4 instrumentability and colocalisation across 28 CRC target proteins">
+  <defs>
+    <style>
+      .title { font: 700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #0f172a; }
+      .sub { font: 400 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #475569; }
+      .lbl { font: 600 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #1e293b; }
+      .lbl-sm { font: 400 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #475569; }
+      .gene { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #0f172a; }
+      .badge { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #ffffff; }
+    </style>
+  </defs>
+
+  <rect x="4" y="4" width="972" height="382" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+
+  <text x="28" y="34" class="title">Cross-Platform cis-pQTL Architecture Across 28 CRC Candidate Proteins (Olink Explore vs SomaScan v4)</text>
+  <text x="28" y="53" class="sub">Olink UKB-PPP EUR instruments 28 / 28 (100%) in cis; SomaScan v4 instruments 15 / 28 after MultiSuSiE CXCL8 rescue (13/14 colocalising at PPH4 &gt;= 0.89)</text>
+
+  <!-- Stacked Horizontal Proportion Bar (x=28 to x=952, total width = 924px for 28 proteins -> 33px per protein) -->
+  <!-- Category 1: 13 Dual-Platform Colocalising (13 * 33 = 429px) -->
+  <rect x="28" y="72" width="429" height="40" rx="6" fill="#0d9488"/>
+  <text x="242" y="97" text-anchor="middle" class="badge">13 / 28 (46.4%) Colocalising (PPH4 = 0.89–1.00)</text>
+
+  <!-- Category 2: 1 Platform-Discordant CCL3 (1 * 33 = 33px, widened visually to 46px with slight adjustment to keep total 924) -->
+  <rect x="459" y="72" width="44" height="40" rx="4" fill="#dc2626"/>
+  <text x="481" y="97" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">1 (CCL3)</text>
+
+  <!-- Category 3: 11 Olink cis+ / SomaScan cis-null (11/28 -> 352px) -->
+  <rect x="505" y="72" width="348" height="40" rx="4" fill="#4f46e5"/>
+  <text x="679" y="97" text-anchor="middle" class="badge">11 / 28 (39.3%) Olink cis+ / SomaScan cis-null</text>
+
+  <!-- Category 4: 3 Absent from SomaScan v4 (97px) -->
+  <rect x="855" y="72" width="97" height="40" rx="6" fill="#64748b"/>
+  <text x="903" y="97" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">3 Unmeasured</text>
+
+  <!-- 4 Detail Cards Below -->
+  <!-- Card 1: Dual-Platform Replicating -->
+  <rect x="28" y="132" width="312" height="232" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="42" y="156" class="lbl" fill="#0f766e">1. Dual-Platform Colocalising (13 Proteins)</text>
+  <text x="42" y="176" class="lbl-sm">PPH4 &gt;= 0.99 (11 proteins):</text>
+  <text x="42" y="194" class="gene">MMP7, TFF1, IL2RA,MMP12, TFF3,</text>
+  <text x="42" y="210" class="gene">TNFSF12, TFF2*, REG4, GDF15, TNFRSF6B, CCL7†</text>
+  <text x="42" y="232" class="lbl-sm">PPH4 = 0.75–0.92 (2 proteins):</text>
+  <text x="42" y="250" class="gene">CCL25 (0.92 Z_AFR), CXCL8* (0.89 MSuSiE-3)</text>
+  <text x="42" y="278" class="lbl-sm">*MultiSuSiE-3 rescued CXCL8 from sub-threshold</text>
+  <text x="42" y="294" class="lbl-sm">and lifted TFF2 coloc from 0.539 -&gt; 0.9998.</text>
+  <text x="42" y="314" class="lbl-sm">†CCL7 colocalises on primary lead (CARMA</text>
+  <text x="42" y="330" class="lbl-sm">PPH4=1.00; rRSS pruned primary slot V=7.17).</text>
+
+  <!-- Card 2: Platform-Discordant Epitope/CNV -->
+  <rect x="352" y="132" width="210" height="232" rx="8" fill="#ffffff" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="366" y="156" class="lbl" fill="#b91c1c">2. Platform-Discordant (1)</text>
+  <text x="366" y="180" class="gene">CCL3 (17q12 CNV locus)</text>
+  <text x="366" y="204" class="lbl-sm">• SomaScan EUR vs AFR:</text>
+  <text x="374" y="220" class="gene">r_PIP = 1.00, PPH4 = 1.000</text>
+  <text x="366" y="244" class="lbl-sm">• Olink vs SomaScan:</text>
+  <text x="374" y="260" class="gene">0 shared CS SNPs</text>
+  <text x="374" y="276" class="gene">PPH3 = 0.82–0.90</text>
+  <text x="366" y="304" class="lbl-sm">Distinct genetic signals</text>
+  <text x="366" y="320" class="lbl-sm">(epitope / CCL3L1 paralogue</text>
+  <text x="366" y="336" class="lbl-sm">cross-reactivity; Tier C).</text>
+
+  <!-- Card 3: Olink cis+ / SomaScan cis-null -->
+  <rect x="574" y="132" width="222" height="232" rx="8" fill="#ffffff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="588" y="156" class="lbl" fill="#3730a3">3. SomaScan cis-Null (11)</text>
+  <text x="588" y="176" class="lbl-sm">Strong Olink cis (LP 7.5–860),</text>
+  <text x="588" y="192" class="lbl-sm">SomaScan LP &lt;= 4.6 up to N=35.6k:</text>
+  <text x="588" y="214" class="gene">TNFRSF10A (LP=860), CSF1 (137),</text>
+  <text x="588" y="230" class="gene">KRT19 (81), CA9 (52), IL17C (52),</text>
+  <text x="588" y="246" class="gene">TNFRSF13B (44), AGR2 (43),</text>
+  <text x="588" y="262" class="gene">CCL20 (34), CCL2 (15),</text>
+  <text x="588" y="278" class="gene">ADGRG2 (8), IFNG (7.5)</text>
+  <text x="588" y="306" class="lbl-sm">MultiSuSiE-3: 0/11 false CSs</text>
+  <text x="588" y="322" class="lbl-sm">(uninformative aptamer, not PAV).</text>
+
+  <!-- Card 4: Absent from SomaScan v4 -->
+  <rect x="808" y="132" width="144" height="232" rx="8" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+  <text x="820" y="156" class="lbl" fill="#334155">4. Olink-Only (3)</text>
+  <text x="820" y="178" class="lbl-sm">No SomaScan v4</text>
+  <text x="820" y="194" class="lbl-sm">aptamer reagent:</text>
+  <text x="820" y="220" class="gene">C1QA (LP=478)</text>
+  <text x="820" y="240" class="gene">CA14 (LP=129)</text>
+  <text x="820" y="260" class="gene">RBP2 (LP=18)</text>
+  <text x="820" y="294" class="lbl-sm">All 3 fine-mapped</text>
+  <text x="820" y="310" class="lbl-sm">cleanly in Sun EUR</text>
+  <text x="820" y="326" class="lbl-sm">(rRSS / CARMA).</text>
+</svg>

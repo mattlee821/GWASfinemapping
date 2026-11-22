@@ -1,8 +1,8 @@
 # GWASfinemapping
 
-GWASfinemapping performs locus-level statistical fine-mapping and LD-based variant prioritisation on standardised GRCh38 GWAS-VCFs (specification 1.0.0, as written by [GWASprocessing](https://github.com/mattlee821/GWASprocessing)). It screens each GWAS for genome-wide significant associations ($P \le 5 \times 10^{-8}$), defines merged 3 Mb lead windows, protein `cis_gene` windows and a single extended MHC region, lifts and aligns variants to GRCh37 against the 6 public Pan-UKB LD panels (`AFR`, `AMR`, `CSA`, `EAS`, `EUR`, `MID`), extracts each locus LD matrix once, and runs up to 5 methods (`p-ld`, `susie-rss`, `susie-rrss`, `carma`, `polyfun`). Multi-gigabyte scratch LD matrices are deleted as each locus finishes; only compact, `coloc`-ready `.rda` (or `.rds`) files, `{metadata,provenance,qc}.json` and a self-contained `report.html` are kept (~25–40 MB per active GWAS). It runs under Nextflow on a Mac or a SLURM cluster, and 2 setup commands install its tools and reference data.
+GWASfinemapping performs locus-level statistical fine-mapping, LD-based variant prioritisation, and opt-in multi-cohort / multi-ancestry joint `cis` fine-mapping (`MultiSuSiE`) on standardised GRCh38 GWAS-VCFs (specification 1.0.0, as written by [GWASprocessing](https://github.com/mattlee821/GWASprocessing)). By default it screens each GWAS for genome-wide significant associations ($P \le 5 \times 10^{-8}$), defines merged 3 Mb lead windows, protein `cis_gene` windows and a single extended MHC region, lifts and aligns variants to GRCh37 against the 6 public Pan-UKB LD panels (`AFR`, `AMR`, `CSA`, `EAS`, `EUR`, `MID`), extracts each locus LD matrix once, and runs up to 5 single-study methods (`p-ld`, `susie-rss`, `susie-rrss`, `carma`, `polyfun`). Multi-gigabyte scratch LD matrices are deleted as each locus finishes; only compact, `coloc`-ready `.rda` (or `.rds`) files, `{metadata,provenance,qc}.json` and a self-contained `report.html` are kept (~25–40 MB per active GWAS). It runs under Nextflow on a Mac or a SLURM cluster, and 2 setup commands install its tools and reference data.
 
-Supporting design notes and literature audits are in [docs/architecture.md](docs/architecture.md), [docs/literature_review.md](docs/literature_review.md), [docs/panukb-ld.md](docs/panukb-ld.md), and [docs/reference-data.md](docs/reference-data.md).
+Full documentation and our empirical **28-Protein / 8-Model Cross-Platform & MultiSuSiE Benchmark** are published on GitHub Pages at **[https://mattlee821.github.io/GWASfinemapping/](https://mattlee821.github.io/GWASfinemapping/)** (source pages in [docs/index.md](docs/index.md), [docs/running-analyses.md](docs/running-analyses.md), [docs/methods.md](docs/methods.md), [docs/outputs-and-coloc.md](docs/outputs-and-coloc.md), and [docs/sun_eur_vs_all_comparison_report.md](docs/sun_eur_vs_all_comparison_report.md)).
 
 ## Installation
 
@@ -11,7 +11,7 @@ You need `bash`, `curl`, and `git` (on a Mac, install the Command Line Tools wit
 #### 1. Clone the repository
 
 ```bash
-git clone https://github.com/mattlee821/finemapping.git GWASfinemapping
+git clone https://github.com/mattlee821/GWASfinemapping.git
 cd GWASfinemapping
 ```
 
@@ -22,7 +22,7 @@ Both routes use the same repository, reference data, manifests and `scripts/fine
 | Route | Use it when | What step 4 installs |
 |---|---|---|
 | Local tools (default) | on a Mac, or on a Linux cluster without Apptainer | OpenJDK 21, Nextflow, Python 3.12 (`hail`, `ldcov[s3]`, `lazybgen`, `pyarrow`, `pyliftover`), `bcftools`, `gsl`, R 4.6, pinned `susieR` 2.0.0, pinned `CARMA`, and the local `gwasfinemapping` R/C package under `~/.cache/gwasfinemapping/` (or `GWASFM_TOOLS_ROOT`); no administrator rights needed |
-| Container | on a cluster with Apptainer (`module load apptainer` first if your cluster uses modules), or on a machine with Docker | the published image `ghcr.io/mattlee821/finemapping:latest`, inside which tasks execute, plus the host runtime used to launch Nextflow |
+| Container | on a cluster with Apptainer (`module load apptainer` first if your cluster uses modules), or on a machine with Docker | the published image `ghcr.io/mattlee821/gwasfinemapping:latest`, inside which tasks execute, plus the host runtime used to launch Nextflow |
 
 #### 3. Choose where the data go (optional)
 
@@ -135,6 +135,7 @@ bash scripts/benchmark.sh --server-panukb /home/leem/GWASprocessing/GWAS/sun_202
    | `metadata`, `qc`, `trait`, `ancestry` | no | explicit sidecar paths or metadata overrides when not alongside `vcf` |
 
 3. **Single VCF (`--vcf`):** Pass `--vcf /path/to/trait.gwas.vcf.gz` with optional `--study-id`, `--gwas-id`, `--metadata`, `--qc`, `--ancestry`, and `--gene-id`.
+4. **Opt-in multi-cohort / multi-ancestry `MultiSuSiE` (`--multisusie-studies` or `--multisusie-manifest`; off by default):** Jointly fine-map `cis_gene` regions across $K \ge 2$ cohorts measuring the same trait/reagent while keeping each cohort's sample size $N_k$ and ancestry-matched Pan-UKB LD panel (`EUR`, `AFR`, etc.) separate, writing `<outdir>/<group_study_id>/<group_id>/methods/multisusie.rda` (directly compatible with `coloc::coloc.susie()`). See [docs/running-analyses.md](docs/running-analyses.md) for manifest format and best-practice cohort selection.
 
 #### 2. Choose fine-mapping methods and options
 
@@ -191,6 +192,14 @@ sbatch scripts/finemap.sh \
   --manifest manifests/sun_mr18.tsv \
   --ld-pop EUR \
   --max-forks 16 \
+  --slurm
+
+# Opt-in MultiSuSiE: jointly fine-map shared cis_gene aptamers across UK EUR + US EUR + US AFR cohorts
+sbatch scripts/finemap.sh \
+  --multisusie-studies /home/leem/GWASprocessing/GWAS/pietzner_2021_34648354,/home/leem/GWASprocessing/GWAS/zhang_2022_35501419_EUR,/home/leem/GWASprocessing/GWAS/zhang_2022_35501419_AFR \
+  --group-study-id somascan_multisusie_3cohort \
+  --cis-significance-lp 0 \
+  --max-forks 8 \
   --slurm
 ```
 

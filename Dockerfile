@@ -12,7 +12,8 @@ COPY --chown=$MAMBA_USER:$MAMBA_USER environment.yml /tmp/environment.yml
 COPY --chown=$MAMBA_USER:$MAMBA_USER requirements-tools.txt /tmp/requirements-tools.txt
 RUN micromamba install -y -n base -f /tmp/environment.yml && micromamba clean -a -y
 RUN PYTHONNOUSERSITE=1 micromamba run -n base python -m pip install --upgrade pip \
-    && PYTHONNOUSERSITE=1 micromamba run -n base python -m pip install -r /tmp/requirements-tools.txt
+    && PYTHONNOUSERSITE=1 micromamba run -n base python -m pip install -r /tmp/requirements-tools.txt \
+    && PYTHONNOUSERSITE=1 micromamba run -n base python -m pip install --no-deps https://github.com/jordanero/MultiSuSiE/archive/refs/heads/main.zip
 
 COPY --chown=$MAMBA_USER:$MAMBA_USER . /opt/gwasfinemapping
 WORKDIR /opt/gwasfinemapping

@@ -391,11 +391,13 @@ agg_rows <- lapply(studies_present, function(sid) {
   act <- sub[sub$cis_variants_matched > 0L, , drop = FALSE]
   act_cs <- act[!is.na(act$rrss_cs) & act$rrss_cs > 0L, , drop = FALSE]
   all_sz <- study_cs_sizes[[sid]] %||% integer()
+  anc_tokens <- sort(unique(unlist(strsplit(as.character(sub$gwas_ancestry), "\\+"))))
+  ld_tokens <- sort(unique(unlist(strsplit(as.character(sub$ld_population), "\\+"))))
   data.frame(
     study_id = sid,
     platform = sub$platform[[1L]],
-    gwas_ancestry = sub$gwas_ancestry[[1L]],
-    ld_population = sub$ld_population[[1L]],
+    gwas_ancestry = paste(anc_tokens[nzchar(anc_tokens)], collapse = "+"),
+    ld_population = paste(ld_tokens[nzchar(ld_tokens)], collapse = "+"),
     assays_total = nrow(sub),
     cis_activated = nrow(act),
     rss_with_cs = sum(!is.na(act$rss_cs) & act$rss_cs > 0L),
