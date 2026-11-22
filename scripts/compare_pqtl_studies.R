@@ -84,9 +84,11 @@ compute_susie_coloc_summary <- function(fit1, fit2, p1 = 1e-4, p2 = 1e-4, p12 = 
       lh0 <- 0
       lh1 <- log(p1) + l1_sum
       lh2 <- log(p2) + l2_sum
-      # log(exp(l1_sum + l2_sum) - exp(l12_sum)) guarded against numerical cancellation
+      # log(exp(l1_sum + l2_sum) - exp(l12_sum)) guarded against both cancellation and >709 overflow
       diff_arg <- (l1_sum + l2_sum) - l12_sum
-      lh3 <- if (diff_arg > 1e-12) {
+      lh3 <- if (diff_arg > 35) {
+        log(p1) + log(p2) + l12_sum + diff_arg
+      } else if (diff_arg > 1e-12) {
         log(p1) + log(p2) + l12_sum + log(expm1(diff_arg))
       } else {
         -Inf

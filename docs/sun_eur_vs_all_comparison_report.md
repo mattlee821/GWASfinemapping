@@ -1,82 +1,87 @@
-# UKB-PPP `EUR` vs. `ALL` Fine-Mapping Report & Pipeline Hardening Summary
+# Cross-Study, Cross-Platform & Cross-Ancestry pQTL Fine-Mapping Report (28 CRC Target Proteins)
 
-**Date:** 21 November 2026  
-**Target Panel:** 31 Olink Explore 3072 assays (28 unique CRC-candidate proteins, including all 4 `CXCL8` panel replicates)  
-**Studies Completed:** `sun_2023_37794186_EUR` (31/31) vs. `sun_2023_37794186_ALL` (31/31) against `Pan-UKB EUR` ($B = 420{,}542$)  
-**Cross-Study Extension:** `ferkingstad_2021_34857953` (`EUR`), `pietzner_2021_34648354` (`EUR`), `zhang_2022_35501419_EUR` (`EUR`), and `zhang_2022_35501419_AFR` (`AFR` against `Pan-UKB AFR`, $B = 6{,}637$)
+**Date:** 22 November 2026  
+**Target Panel:** 28 unique colorectal cancer (CRC) candidate proteins (**31** Olink Explore 3072 assays including all **4** `CXCL8` panel replicates; **164** total protein-GWAS assays across **6** cohorts)  
+**Studies Completed (164 / 164 = 100%):**
+- `sun_2023_37794186_EUR` (UKB-PPP Olink Explore 3072, `EUR` vs. `Pan-UKB EUR`, $B = 420{,}542$; `31/31`)
+- `sun_2023_37794186_ALL` (UKB-PPP Olink Explore 3072, multi-ancestry `ALL` vs. `Pan-UKB EUR`; `31/31`)
+- `pietzner_2021_34648354` (Fenland UK SomaScan v4, `EUR` vs. `Pan-UKB EUR`; `26/26`)
+- `ferkingstad_2021_34857953` (deCODE Iceland SomaScan v4, `EUR` vs. `Pan-UKB EUR`; `26/26`)
+- `zhang_2022_35501419_EUR` (ARIC EA cis-only SomaScan v4, `EUR` vs. `Pan-UKB EUR`; `25/25`)
+- `zhang_2022_35501419_AFR` (ARIC AA cis-only SomaScan v4, `AFR` vs. **`Pan-UKB AFR`**, $B = 6{,}637$; `25/25`)
 
 > [!IMPORTANT]
-> Switching from pooled multi-ancestry `sun_2023_37794186_ALL` to ancestry- and cohort-matched `sun_2023_37794186_EUR` increased `cis_gene` activation from **96.8% (30/31)** to **100% (31/31)** (rescuing `IFNG`), raised `SuSiE-RSS` valid credible-set recovery from **36.7% (11/30)** to **87.1% (27/31)**, and raised `SuSiE-rRSS` convergence and credible-set recovery from **76.7% (23/30)** to **96.8% (30/31)** (`median = 18` IBSS iterations, median `max_V = 0.01`). Combining `SuSiE-rRSS` and `CARMA` achieved **100% (31/31)** `cis_gene` credible-set coverage in `EUR`.
+> **Three Headline Conclusions Across All 164 Assays:**
+> 1. **Empirical Proof of the Three LD-Match Regimes:** Ancestry- and population-matched cohorts achieved **96.8%–100.0%** `SuSiE-rRSS` convergence (`pietzner` UK `EUR`: **14/14**, `zhang_EUR`: **12/12**, `zhang_AFR` [$B = 6{,}637$]: **10/10**, `sun_EUR`: **30/31**; median `6.5–18` iterations). By contrast, both **within-continent founder drift** (`ferkingstad` Iceland `EUR` against UK `Pan-UKB EUR`) and **multi-ancestry meta-analysis** (`sun_ALL` against UK `Pan-UKB EUR`) collapsed standard `SuSiE-RSS` to **42.9% (6/14)** and **43.3% (13/30)**, respectively — rescued to **78.6% (11/14)** and **76.7% (23/30)** by `SuSiE-rRSS` (`eb_mix`) + two-tier gating, and to **100%** by `CARMA`.
+> 2. **Olink PEA Doubles `cis`-pQTL Instrumentability Over SomaScan v4 for These 28 CRC Proteins:** `sun_2023_37794186_EUR` ($N \approx 34.6\text{k}$) detects genome-wide significant `cis_gene` pQTLs for **28 / 28 (100%)** target proteins (`31/31` assays). At comparable sample size, SomaScan v4 (`ferkingstad`, $N = 35.6\text{k}$) instruments only **13 / 28 (46.4%)** unique proteins (`14/26` assays): **3** proteins (`C1QA`, `CA14`, `RBP2`) are absent from SomaScan v4, and **11** (`ADGRG2`, `AGR2`, `CA9`, `CCL2`, `CCL20`, `CSF1`, `IFNG`, `IL17C`, `KRT19`, `TNFRSF10A`, `TNFRSF13B`) are cis-null on SomaScan ($-\log_{10} P \le 4.6$) despite strong Olink cis signals ($-\log_{10} P = 7.5\text{–}860$).
+> 3. **Cross-Platform & Cross-Ancestry Replication vs. Epitope Divergence:** Among the **14** proteins with significant `cis` signals on both platforms, **12** colocalise strongly (`coloc.susie` $\max PP.H_4 \ge 0.86$, and $\ge 0.98$ at 10 loci across `EUR` and `AFR`), `CXCL8` shows moderate colocalisation with a borderline deCODE hit ($PP.H_4 = 0.79$), and **1 (`CCL3`)** is a textbook platform-discordant aptamer/epitope artifact ($PP.H_3 = 0.82\text{–}0.90$, `0` shared CS variants between Olink and SomaScan despite `Zhang EUR` vs. `AFR` SomaScan $PP.H_4 = 1.00$).
 
 ---
 
-## 1. Methodological & Engineering Challenges Uncovered and Resolved
+## 1. Seven Methodological & Engineering Challenges Uncovered and Resolved
 
 ```mermaid
 flowchart LR
     A["GRCh38 GWAS-VCF"] --> B["MAF >= 1% Filter (--min-maf 0.01)"]
-    B --> C["GRCh38 -> GRCh37 Liftover & <=9.6 Mb Band Clamp"]
-    C --> D["Pan-UKB BlockMatrix Extract (Bounded RAM + Degenerate Row Prune)"]
+    B --> C["Target-Chrom Liftover & <=9.6 Mb GRCh37 Band Clamp"]
+    C --> D["Pan-UKB BlockMatrix Extract (Bounded RAM + Degenerate Prune)"]
     D --> E["Multi-Method Runner (16-CPU matprod='blas' on MHC)"]
     E --> F["Two-Tier SuSiE Gate (Converged + Per-Slot V <= 1.0)"]
-    F --> G["Ancestry-Mirrored Output (<study_dir>/<gwas_id>)"]
+    F --> G["Ancestry-Mirrored Output & Overflow-Safe coloc.susie"]
 ```
 
-During development and validation on `MMP12` (`P39900_OID21439`) and the 31-assay benchmark, six distinct statistical and computational failure modes surfaced and were fixed in `GWASfinemapping`:
+During development on `MMP12` (`P39900_OID21439`) and full execution across all 6 cohorts (`164` assays), seven distinct statistical and engineering failure modes were identified and fixed:
 
-### 1.1 Cross-Ancestry Meta-Analysis vs. Single-Panel LD Algebra Violation ($\Delta r \cdot Z$)
-- **Symptom:** On `MMP12` (`ALL`, `LP = 1592.8`, $|Z| \approx 85.5$) and 9 other strong cis-pQTLs in `sun_2023_37794186_ALL` (`RBP2`, `CCL7`, `C1QA`, `AGR2`, `GDF15`, `CCL25`, `TNFRSF6B`, `TFF1`, `TNFSF12`), `SuSiE` either failed to converge or estimated prior effect variances of $V \in [1.5, 398.6]$ with $\text{LBF} > 100{,}000$ via opposite-sign collinear cancellation.
-- **Root Cause:** `sun_2023_37794186_ALL` is an inverse-variance-weighted meta-analysis across European (~46k) and non-European (~8k `AFR`, `CSA`, `EAS`, `AMR`) UK Biobank participants, where per-variant ancestry weights $w_{jk} \propto N_k \cdot 2 f_{jk}(1 - f_{jk})$ vary by allele frequency. Under RSS, any cross-ancestry LD discrepancy $\Delta r$ around a causal variant produces a phantom residual association:
-  $$Z_{\text{phantom}} = (R^{\text{GWAS}}_{j,\text{causal}} - R^{\text{EUR}}_{j,\text{causal}}) \cdot Z_{\text{causal}} = \Delta r \cdot Z_{\text{causal}}$$
-  At $|Z_{\text{causal}}| = 85$, even $\Delta r = 0.15$ yields $|Z_{\text{phantom}}| \approx 12.8$ ($P < 10^{-36}$), exceeding `eb_mix`'s genome-wide significance gate ($Z_{\text{ref}} = 5.45$) and driving unbounded scalar `V` optimization (`log(V) ∈ [-30, 15]`) into opposite-sign cancellation on tightly correlated SNPs.
+### 1.1 Cross-Ancestry & Founder-Drift LD Algebra Violation ($\Delta r \cdot Z$)
+- **Symptom:** On `MMP12` (`ALL`, `LP = 1592.8`, $|Z| \approx 85.5$) and 8 other strong cis-pQTLs in `sun_2023_37794186_ALL` (`RBP2`, `CCL7`, `C1QA`, `AGR2`, `GDF15`, `CCL25`, `TNFRSF6B`, `TFF1`), as well as 5 high-$|Z|$ loci in deCODE Iceland (`ferkingstad`), `SuSiE` either failed to converge or inflated prior effect variances to $V \in [1.02, 398.6]$ via opposite-sign collinear cancellation.
+- **Root Cause:** Under summary-statistic RSS, any LD correlation discrepancy $\Delta r$ between the GWAS discovery sample and the external LD panel around a causal variant induces a phantom residual association:
+  $$Z_{\text{phantom}} = (R^{\text{GWAS}}_{j,\text{causal}} - R^{\text{LD}}_{j,\text{causal}}) \cdot Z_{\text{causal}} = \Delta r \cdot Z_{\text{causal}}$$
+  At $|Z_{\text{causal}}| = 85$, even $\Delta r = 0.15$ (from multi-ancestry meta-analysis weights in `sun_ALL` or Icelandic founder drift in `ferkingstad`) produces $|Z_{\text{phantom}}| \approx 12.8$ ($P < 10^{-36}$), driving unbounded scalar prior variance optimization (`log(V) ∈ [-30, 15]`) into collinear opposite-sign cancellation.
 - **Resolution:**
-  1. **Primary solution (cohort-matched LD):** Use `sun_2023_37794186_EUR` against `Pan-UKB EUR` (in-sample UK Biobank European LD), eliminating cross-ancestry $\Delta r$ at the source (`max_V` on `GDF15` fell from `21.41` → `0.08`; `RBP2` from `372.03` → `0.004`; `MMP12` from `4.26` → `0.11`).
+  1. **Cohort- and ancestry-matched LD:** Match `sun_2023_37794186_EUR` and `pietzner`/`zhang_EUR` to `Pan-UKB EUR`, and `zhang_2022_35501419_AFR` to `Pan-UKB AFR` ($B = 6{,}637$).
   2. **Two-tier credible-set validity gate** ([finemap_susie.R](../R/finemap_susie.R)):
-     - **Tier 1 (Non-convergence):** Whenever `!isTRUE(fit$converged)`, **all** credible sets at the locus are suppressed (`0` rows in `credible_sets` and `fit$sets$cs <- NULL`) so downstream `coloc::coloc.susie()` never colocalises unconverged slots.
-     - **Tier 2 (Per-slot $V \le 1.0$ filter on converged fits):** On unit-variance standardized summary statistics, a single variant cannot plausibly have prior variance $V_l > 1.0$. When `converged == TRUE`, individual slots with $V_l > 1.0$ are surgically removed from `credible_sets`, `fit$sets$cs`, and `fit$sets$cs_index` while preserving valid cis-pQTL lead slots ($V_l \le 1.0$). On `ALL`, this rescued valid cis credible sets on `AGR2` (`1`), `MMP12` (`2`, including `rs17368814`), `TFF1` (`4`), and `C1QA` (`2`), and on `EUR` it cleanly isolated `3` valid CSs on `CCL7` (`3` kept, `2` dropped).
-  3. **Iteration budget:** Raised default `--max-iter` from `50` to `100` (`lead_locus` / `mhc`) and added `--cis-max-iter 200` for `cis_gene` windows ([locus_worker.py](../scripts/locus_worker.py)).
+     - **Tier 1 (Non-convergence):** When `!isTRUE(fit$converged)`, **all** credible sets at the locus are suppressed (`fit$sets$cs <- NULL`) so downstream `coloc.susie` never evaluates unconverged IBSS slots.
+     - **Tier 2 (Per-slot $V_l \le 1.0$ filter on converged fits):** On unit-variance standardized summary statistics, slots with $V_l > 1.0$ are surgically pruned from `credible_sets`, `fit$sets$cs`, and `fit$sets$cs_index` while preserving valid lead credible sets ($V_l \le 1.0$).
+  3. **Iteration budget:** Raised `--max-iter` to `100` (`lead_locus` / `mhc`) and `--cis-max-iter` to `200` ([locus_worker.py](../scripts/locus_worker.py)).
 
-### 1.2 `SuSiE-rRSS` `eb_mix` Disabled Above $M = 5{,}000$ Variants
-- **Symptom:** Previously, `eigen_max_variants = 5000L` reset `R_mismatch <- "none"` whenever $M > 5{,}000$, disabling `eb_mix` on almost every 2 Mb `cis_gene` window ($M \approx 5{,}400\text{–}20{,}700$).
-- **Root Cause:** Only `susieR` 2.0's optional `Q_art` subspace diagnostic uses `eigen(R)` ($O(M^3)$); both 1-effect Maller SER initialization (`initialize_R_mismatch`) and empirical-Bayes residual variance inflation (`lambda_bias` / `B_corrected`) are $O(M)$ vector operations (`< 1 ms`).
-- **Resolution:** Kept `R_mismatch = "eb_mix"` active at **all** region sizes $M$ ([finemap_susie.R](../R/finemap_susie.R)), raised `eigen_max_variants` to `20,000` (reusing 1 `eigen()` call for both PSD validation and `Q_art`), and passed a 1-column sentinel `eigen_R` above `20,000` (`q_art_eigen = "skipped_large_m"`). In `EUR`, active `eb_mix` rescued **3** loci where standard `SuSiE-RSS` returned 0 CSs: `CCL25` (`10` CSs at `LP = 1756`), `CA14` (`7` CSs), and `CCL7` (`3` CSs).
+### 1.2 `SuSiE-rRSS` `eb_mix` Previously Disabled Above $M = 5{,}000$ Variants
+- **Root Cause & Fix:** `eigen_max_variants = 5000L` previously reset `R_mismatch <- "none"` above $M = 5{,}000$, turning off `eb_mix` on nearly all 2 Mb `cis_gene` windows ($M \approx 5{,}400\text{–}20{,}700$). Only the optional `Q_art` diagnostic needs $O(M^3)$ `eigen(R)`, whereas Maller SER initialization and `lambda_bias` / `B_corrected` estimation are $O(M)$. Kept `R_mismatch = "eb_mix"` active at **all** $M$ ([finemap_susie.R](../R/finemap_susie.R)) and raised `eigen_max_variants` to `20,000` (reusing 1 `eigen()` call for PSD check + `Q_art`). Active `eb_mix` rescued `CCL25`, `CA14`, and `CCL7` in `Sun EUR` and raised deCODE `Ferkingstad` CS recovery from `6/14` (`RSS`) to `11/14` (`rRSS`).
 
 ### 1.3 Ultra-Rare Variant Zero-LD Inflation in `p-ld` (`--min-maf 0.01`)
-- **Symptom:** Without MAF filtering, `MMP12` (`ALL`) selected **308** variants at $r^2 < 0.001$ inside a single 2 Mb cis window.
-- **Root Cause:** Ultra-rare variants ($\text{MAF} < 0.001$, often ancestry-specific) have near-zero sample $r^2$ in `Pan-UKB EUR` against the `LP = 1593` lead SNP yet pass $P \le 5 \times 10^{-8}$ via finite-sample / hitchhiking effects, creating hundreds of redundant pseudo-independent instruments.
-- **Resolution:** Added `--min-maf 0.01` (`1%` minor allele frequency $\min(\text{AF}, 1 - \text{AF}) \ge 0.01$ via `FORMAT/AF`, configurable with `--min-maf <float>`, `0` to disable) across [screen_gwas.py](../scripts/screen_gwas.py) and [prep_locus.py](../scripts/prep_locus.py). On `MMP12`, `p-ld` ($r^2 < 0.001$) dropped from **308 → 63 (`EUR`) / 83 (`ALL`)**.
+- **Root Cause & Fix:** Without MAF filtering, ultra-rare variants ($\text{MAF} < 0.001$) with near-zero sample $r^2$ in Pan-UKB inflated `MMP12` (`ALL`) `p-ld` ($r^2 < 0.001$) to **308** pseudo-independent hits in a single cis window. Enforced `--min-maf 0.01` ($\min(\text{AF}, 1 - \text{AF}) \ge 0.01$) across [screen_gwas.py](../scripts/screen_gwas.py) and [prep_locus.py](../scripts/prep_locus.py), cutting `MMP12` `p-ld` to **63 (`EUR`) / 83 (`ALL`)**.
 
-### 1.4 Pericentromeric & Segmental-Duplication Liftover Jumps (`REG4` on `chr1`, `chrX` Handling)
-- **Symptom:** `cis_REG4` (`chr1:117.15–122.90 Mb` GRCh38, `1p12`) failed in `prep_locus.py` with `Region spans 32,008,984 bp on GRCh37, exceeding Pan-UKB's 10 Mb LD band`.
-- **Root Cause:** `REG4` (`chr1:119.80 Mb`) adjoins the `NOTCH2NL`/`NBPF` pericentromeric segmental-duplication block (`120.4–121.4 Mb` GRCh38), whose contigs were placed on the opposite chromosome arm (`1q21.1`, `~149.7 Mb`) in GRCh37, where Pan-UKB stores zero pairwise LD with `1p12`.
-- **Resolution:** Added automated two-pointer GRCh37 band clamping (`_clamp_to_grch37_ld_band` at $\le 9.6\text{ Mb}$ anchored on the target gene / lead variant), degenerate Pan-UKB diagonal/edge-`NaN` pruning, and clean non-indexed region skipping in [prep_locus.py](../scripts/prep_locus.py). `REG4` (`EUR`) subsequently converged in **7 iterations** with exact **`4 / 4 / 4 / 4`** credible sets across all four Bayesian methods; `ADGRG2` (`chrX`) also mapped `2,587` (`EUR`) / `2,861` (`ALL`) Pan-UKB `chrX` variants cleanly (`2 / 2 / 2` CSs in `EUR`).
+### 1.4 Pericentromeric GRCh38→GRCh37 Arm Jumps (`REG4` on `chr1`, `CA9` on `chr9`)
+- **Root Cause & Fix:** `REG4` (`1p12`, `chr1:119.80 Mb` GRCh38) adjoins `NOTCH2NL`/`NBPF` pericentromeric duplications that lift `>29 Mb` across the centromere to `1q21.1` (`~149.7 Mb` GRCh37), exceeding Pan-UKB's 10 Mb BlockMatrix band (`32.0 Mb` span). Added `_clamp_to_grch37_ld_band` ($\le 9.6\text{ Mb}$ anchored on target gene / lead variant) and degenerate diagonal/edge-`NaN` pruning in [prep_locus.py](../scripts/prep_locus.py). `REG4` (`Sun EUR`) converged in 7 iterations with `4/4/4/4` CSs.
 
-### 1.5 Extended MHC (`chr6:25.5–34.0 Mb`) Memory & Single-Threaded R `matprod` Bottleneck
-- **Symptom:** Early MHC runs hit OOM (`exit=137`) during `ldcov` assembly and later hit SLURM's `8h` attempt-1 walltime (`exit=140`) when running `susie_rss` + `susie_rrss` + `polyfun` sequentially on 4 CPUs.
-- **Root Cause:** (a) Unbounded thread-pool block futures in LD assembly spiked RAM by ~95 GB; (b) R ≥ 4.0's default `options(matprod = "default")` runs a **single-threaded `ISNAN()` scan across the entire 16 GB $M \times M$ `XtX` matrix on every IBSS matrix-vector product** before calling multi-threaded OpenBLAS.
-- **Resolution:** Implemented bounded in-flight BlockMatrix assembly + tiled in-place sign flips ([prep_locus.py](../scripts/prep_locus.py)), automatic Attempt-1 MHC resource tiering (`16` CPUs, `>= 160 GB` RAM, `24h` walltime, `OPENBLAS_NUM_THREADS = 16` in [finemapping.nf](../finemapping.nf) and [locus_worker.py](../scripts/locus_worker.py)), and `options(matprod = "blas")` on pre-validated finite `XtX` ([finemap_susie.R](../R/finemap_susie.R)). Both 31-assay batches (`EUR` and `ALL`) completed every MHC locus on Attempt 1 without timeout.
+### 1.5 Unlocalized GRCh37 `_random` Contig Liftover Crash on deCODE 49x WGS (`1_gl000192_random`)
+- **Symptom:** In `ferkingstad_2021_34857953/Q9BYZ8_11102-22` (`REG4`), three pericentromeric `chr1` loci failed in `bcftools norm` with `[E::faidx_adjust_position] The sequence "1_gl000192_random" was not found`.
+- **Root Cause:** Unlike SNP-array imputed cohorts (`UKB`, `Fenland`, `ARIC`), deCODE's 49x whole-genome sequencing calls variants inside pericentromeric segmental duplications whose UCSC `hg38ToHg19.over.chain.gz` target is the unlocalized GRCh37 contig `chr1_gl000192_random`, which was passed to `bcftools norm -f GRCh37.fa` before cross-chromosome filtering.
+- **Resolution:** Updated `write_lifted_vcf(..., expected_chrom=chrom)` and `normalize_lifted_vcf()` in [run_finemapping.py](../scripts/run_finemapping.py) and [prep_locus.py](../scripts/prep_locus.py) to exclude cross-contig / unlocalized liftover targets (`lifted_to_different_chromosome`) **prior** to `bcftools norm`. `ferkingstad/Q9BYZ8_11102-22` subsequently completed all 9 loci cleanly.
 
-### 1.6 `--keep-intermediates` Preservation & Verbatim `<study_dir>` Output Mirroring
-- Fixed [finalise_gwas.py](../scripts/finalise_gwas.py) so `output_dir / "loci"` is preserved when `--keep-intermediates` is enabled (`matrix.npy`, `matrix.ids.txt`, and `matched_variants.tsv` verified 1:1 aligned at `8,237 × 8,237`), and updated [prepare_manifest.py](../scripts/prepare_manifest.py) to mirror ancestry-specific `GWASprocessing/<study_dir>` names (`sun_2023_37794186_EUR`, `sun_2023_37794186_ALL`, `zhang_2022_35501419_AFR`, etc.) verbatim.
+### 1.6 Extended MHC (`chr6:25.5–34.0 Mb`) Memory & Single-Threaded R `matprod` Bottleneck
+- **Root Cause & Fix:** Bounded in-flight BlockMatrix reads + tiled in-place allele-flip sign updates ([prep_locus.py](../scripts/prep_locus.py)), automatic Attempt-1 MHC scaling (`16` CPUs, `>= 160 GB` RAM, `24h` walltime in [finemapping.nf](../finemapping.nf)), and `options(matprod = "blas")` on pre-validated finite `XtX` ([finemap_susie.R](../R/finemap_susie.R)) eliminated R's single-threaded `ISNAN` pre-scan (3x–9x speedup; 0 MHC timeouts across all 6 cohorts).
+
+### 1.7 `--keep-intermediates` Preservation, Verbatim `<study_dir>` Mirroring & Extreme-LBF `coloc` Overflow Guard
+- Preserved `output_dir / "loci"` under `--keep-intermediates` ([finalise_gwas.py](../scripts/finalise_gwas.py)), mirrored ancestry-specific `<study_dir>` names verbatim ([prepare_manifest.py](../scripts/prepare_manifest.py)), and guarded `log(expm1(diff_arg))` for $\text{LBF}_1 + \text{LBF}_2 > 709.8$ (`diff_arg > 35`) in [compare_pqtl_studies.R](../scripts/compare_pqtl_studies.R).
 
 ---
 
-## 2. Empirical Comparison: `sun_2023_37794186_EUR` vs. `sun_2023_37794186_ALL` (31 Assays)
+## 2. Empirical Comparison: `sun_2023_37794186_EUR` vs. `sun_2023_37794186_ALL` (31 Olink Assays)
 
 ### 2.1 Aggregate Performance Summary
 
 | Metric (`cis_gene` windows, $\text{MAF} \ge 0.01$) | `sun_2023_37794186_EUR` (In-Sample `EUR` LD) | `sun_2023_37794186_ALL` (Multi-Ancestry GWAS + `EUR` LD) |
 |---|---:|---:|
-| **`cis_gene` activated ($P \le 5 \times 10^{-8}$)** | **31 / 31 (100.0%)** | 30 / 31 (96.8%; `IFNG` missed) |
-| **`SuSiE-RSS` loci with $\ge 1$ valid 95% CS** | **27 / 31 (87.1%)** | 11 / 30 (36.7%; **19 wiped out**) |
+| **`cis_gene` activated ($P \le 5 \times 10^{-8}$)** | **31 / 31 (100.0%)** | 30 / 31 (96.8%; `IFNG` diluted to `LP = 6.5`) |
+| **`SuSiE-RSS` loci with $\ge 1$ valid 95% CS** | **27 / 31 (87.1%)** | 13 / 30 (43.3%; **17 wiped out**) |
 | **`SuSiE-rRSS` (`eb_mix`) converged ($\le 200$ iters)** | **30 / 31 (96.8%)** | 23 / 30 (76.7%; 7 non-converged) |
 | **`SuSiE-rRSS` loci with $\ge 1$ valid 95% CS** | **30 / 31 (96.8%)** | 23 / 30 (76.7%; 4 required per-slot $V \le 1$ rescue) |
-| **`PolyFun + SuSiE` autosomal loci with $\ge 1$ valid CS** | **26 / 30 (86.7%)** | 10 / 29 (34.5%) |
+| **`PolyFun + SuSiE` autosomal loci with $\ge 1$ valid CS** | **26 / 30 (86.7%)** | 12 / 29 (41.4%) |
 | **`CARMA` (`outlier_switch = TRUE`) loci with $\ge 1$ CS** | **31 / 31 (100.0%)** | 30 / 30 (100.0%) |
-| **Median `SuSiE-rRSS` iterations (active cis loci)** | **18** (IQR: `12–30`) | **33** (IQR: `11–186`) |
+| **Median `SuSiE-rRSS` iterations (active cis loci)** | **18.0** | **49.5** |
 | **Loci with `SuSiE-rRSS` prior variance blow-up ($V > 1.0$)** | **2 / 31 (6.5%: `CCL7`, `C1QA`)** | **9 / 30 (30.0%: up to $V = 398.6$)** |
 
-### 2.2 Per-Assay Head-to-Head Table (`cis_gene` Windows)
+### 2.2 Per-Assay Head-to-Head Table (`Sun EUR` vs. `Sun ALL` `cis_gene` Windows)
 
 | Assay (`GWAS_ID`) | Gene | `EUR` $M$ | `EUR` LP | `EUR` pLD | `EUR` CS (`RSS` / `rRSS` / `CRM` / `PF`) | `EUR` Conv (it) | `EUR` $\max V$ | `ALL` LP | `ALL` pLD | `ALL` CS (`RSS` / `rRSS` / `CRM` / `PF`) | `ALL` Conv (it) | `ALL` $\max V$ |
 |---|---|---:|---:|---:|---|---|---:|---:|---:|---|---|---:|
@@ -105,44 +110,91 @@ During development and validation on `MMP12` (`P39900_OID21439`) and the 31-assa
 | `P02745_OID20654` | **C1QA** | 14,673 | 477.6 | 89 | `0 / 0(5d) / 7 / 0` | **`F (200)`** | **124.62** | 696.2 | 104 | `0 / 2(3d) / 9 / 0` | `T (171)` | **106.27** |
 | `Q9ULX7_OID21401` | **CA14** | 13,720 | 128.6 | 51 | `0 / 7 / 8 / 0` | `T (32)` | 0.44 | 164.7 | 51 | `0 / 0(8d) / 8 / 0` | **`F (200)`** | 0.13 |
 | `O43508_OID20624` | **TNFSF12** | 6,874 | 446.7 | 34 | `2 / 2 / 3 / 2` | `T (19)` | 0.04 | 665.9 | 48 | `4 / 0(10d) / 7 / 0` | **`F (200)`** | 0.79 |
-| `P01579_OID20495` | **IFNG** | 7,138 | **7.5** | 60 | `1 / 1 / 1 / 1` | `T (18)` | 0.00 | `< 7.3` | 0 | `skipped (<5e-8)` | — | — |
+| `P01579_OID20495` | **IFNG** | 7,138 | **7.5** | 60 | `1 / 1 / 1 / 1` | `T (18)` | 0.00 | `6.5` | 0 | `skipped (<5e-8)` | — | — |
 | `P78556_OID20671` | **CCL20** | 8,472 | 33.8 | 69 | `1 / 1 / 1 / 1` | `T (2)` | 0.00 | 42.6 | 47 | `2 / 2 / 2 / 2` | `T (6)` | 0.00 |
 | `P10147_OID20610` | **CCL3** | 5,675 | 507.3 | 28 | `10 / 8 / 9 / 10` | `T (32)` | 0.06 | 757.4 | 31 | `0 / 10 / 10 / 0` | `T (94)` | 0.48 |
 | `P13500_OID21004` | **CCL2** | 7,080 | 15.1 | 50 | `2 / 1 / 1 / 1` | `T (24)` | 0.00 | 23.8 | 42 | `3 / 2 / 3 / 3` | `T (9)` | 0.00 |
 | `P09237_OID20087` | **MMP7** | 13,587 | 301.3 | 61 | `9 / 10 / 5 / 10` | `T (28)` | 0.06 | 398.8 | 55 | `9 / 10 / 9 / 9` | `T (29)` | 0.05 |
 | `P09603_OID20719` | **CSF1** | 6,318 | 137.1 | 51 | `3 / 3 / 3 / 3` | `T (30)` | 0.01 | 186.2 | 48 | `4 / 3 / 3 / 5` | `T (28)` | 0.01 |
 
-### 2.3 Notable Biological & Structural Edge Cases in `EUR`
-1. **`CXCL8` 4-Panel Replicate Consistency (`OID20153`, `OID20631`, `OID20997`, `OID21430`):**
-   - In `ALL`, standard `SuSiE-RSS` and `PolyFun` failed completely (`0` CSs on all 4 panels).
-   - In `EUR`, all 4 Olink panels converged in `11–23` iterations with `max_V < 0.005`, `p-ld` counts of `23–27`, and `2–4` concordant credible sets across all four Bayesian methods.
-2. **Why `C1QA` (`P02745_OID20654`) and `CCL7` (`P80098_OID20523`) Show Residual $V > 1$ Even in `EUR`:**
-   - **`C1QA` (`chr1:22.63–22.64 Mb`, `1p36.12`):** Sits in the tightly linked `C1QA–C1QC–C1QB` complement subcomponent paralog cluster with short-read mapping ambiguity / structural variation even within `EUR`. `SuSiE-rRSS`'s two-tier gate correctly suppresses `C1QA`'s non-converged SuSiE fit (`0(5d)`), while `CARMA` (`outlier_switch = TRUE`) identifies and removes the discordant structural-variant outliers to recover `7` clean credible sets.
-   - **`CCL7` (`chr17:34.27 Mb`, `17q12` chemokine cluster `CCL2–CCL7–CCL11–CCL8–CCL13`):** Lies inside a well-known copy-number / segmental-duplication hotspot on `17q12`. `SuSiE-rRSS` (`eb_mix`) converged in `77` iterations, and the Tier-2 per-slot gate retained the `3` clean cis credible sets ($V \le 1.0$) while dropping `2` structural-duplication slots ($V = 7.17$).
-3. **`IFNG` (`P01579_OID20495`) Rescued by `EUR` Specificity:**
-   - `IFNG` has a modest European cis-pQTL (`LP = 7.5`, $P = 3.2 \times 10^{-8}$) that is absent/null in non-European subsets, causing sample-size dilution below $P = 5 \times 10^{-8}$ in `ALL`. In `EUR`, all 4 Bayesian methods (`RSS`, `rRSS`, `CARMA`, `PolyFun`) agree on `1` clean credible set (`max_V = 0.002`).
+### 2.3 `CXCL8` Four-Panel Olink Technical Replicate Concordance (`EUR` vs. `ALL`)
+
+`CXCL8` (`P10145`) is measured independently across all 4 Olink Explore 3072 sub-panels (`OID20153` Cardiometabolic, `OID20631` Inflammation, `OID20997` Neurology, `OID21430` Oncology):
+
+| Study | Panel Pair | Shared `cis` SNPs | Shared `rRSS` CS SNPs | `rRSS` $r_{\text{PIP}}$ | `CARMA` $r_{\text{PIP}}$ | `coloc.susie` $\max PP.H_4$ | Top Colocalising Signal |
+|---|---|---:|---:|---:|---:|---:|---|
+| `sun_2023_37794186_EUR` | `OID20631` × `OID21430` | 5,772 | 165 | **0.9981** | **0.9686** | **0.9999** | `L4×L4 (4:73661658:G:GATCAGAAA)` |
+| `sun_2023_37794186_EUR` | `OID20997` × `OID21430` | 5,771 | 104 | **0.9972** | **0.9666** | **1.0000** | `L3×L4 (4:73661658:G:GATCAGAAA)` |
+| `sun_2023_37794186_EUR` | `OID20631` × `OID20997` | 5,776 | 107 | **0.9968** | **0.9769** | **1.0000** | `L4×L3 (4:73661658:G:GATCAGAAA)` |
+| `sun_2023_37794186_EUR` | `OID20153` × `OID20631` | 5,772 | 112 | 0.4492 | 0.2145 | **0.9555** | `L2×L2 (4:73751565:C:T)` |
+| `sun_2023_37794186_EUR` | `OID20153` × `OID20997` | 5,773 | 109 | 0.4332 | 0.1624 | **0.9509** | `L2×L2 (4:73751565:C:T)` |
+| `sun_2023_37794186_EUR` | `OID20153` × `OID21430` | 5,772 | 113 | 0.4383 | 0.2080 | **0.9504** | `L2×L2 (4:73751565:C:T)` |
+| `sun_2023_37794186_ALL` | All 6 panel pairs | 5,891–5,894 | 28–49 | **0.9433–0.9975** | 0.5151–0.8757 | **1.0000** | `L3×L3 (4:73700774:T:A)` (`RSS`/`PF` = `0` CSs on all 4) |
 
 ---
 
-## 3. Six-Cohort Cross-Platform & Cross-Ancestry Comparison Framework
+## 3. Six-Cohort Cross-Platform (Olink vs. SomaScan) & Cross-Ancestry (`EUR` vs. `AFR`) Comparison
 
-With [compare_pqtl_studies.R](../scripts/compare_pqtl_studies.R), we evaluate all 28 target proteins across **6 pQTL datasets** once `GWASfm_cross_study` finishes:
+### 3.1 Cohort-Level Summary Across the Three LD-Match Regimes (`164` Total Assays)
 
-| Study Directory | Cohort | Proteomics Platform | GWAS Ancestry | Pan-UKB LD Panel ($B$) | LD Relationship | Matched Assays |
-|---|---|---|---|---|---|---:|
-| `sun_2023_37794186_EUR` | UK Biobank | Olink Explore 3072 (PEA) | `EUR` | `EUR` ($420{,}542$) | **In-sample UKB `EUR`** | 31 (complete) |
-| `sun_2023_37794186_ALL` | UK Biobank | Olink Explore 3072 (PEA) | `ALL` | `EUR` ($420{,}542$) | Multi-ancestry mismatch control | 31 (complete) |
-| `pietzner_2021_34648354` | Fenland (UK) | SomaScan v4 (Aptamer) | `EUR` | `EUR` ($420{,}542$) | Out-of-sample UK `EUR` | 27 |
-| `ferkingstad_2021_34857953` | deCODE (Iceland) | SomaScan v4 (Aptamer) | `EUR` | `EUR` ($420{,}542$) | Founder-population `EUR` drift | 26 |
-| `zhang_2022_35501419_EUR` | ARIC EA (US) | SomaScan v4 (`cis`-only) | `EUR` | `EUR` ($420{,}542$) | Admixed-European US `EUR` | 23+ |
-| `zhang_2022_35501419_AFR` | ARIC AA (US) | SomaScan v4 (`cis`-only) | `AFR` | **`AFR` ($6{,}637$)** | Finite-sample `AFR` (`R_finite=6637`) | 23+ |
+| Study Directory | Cohort ($N$) | Platform | GWAS / LD ($B$) | LD Regime | Assays | `cis` Active | `RSS` $\ge 1$ CS | `rRSS` Conv (`%`) | `CARMA` $\ge 1$ CS | `PF` $\ge 1$ CS | $V > 1$ Loci | Median `rRSS` Iter |
+|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `sun_2023_37794186_EUR` | UKB (`34.6k`) | Olink PEA | `EUR` / `EUR` (`421k`) | **In-sample UKB `EUR`** | 31 | **31** | 27 (`87%`) | **30 (`96.8%`)** | **31 (`100%`)** | 26 | 2 | 18.0 |
+| `pietzner_2021_34648354` | Fenland UK (`10.7k`) | SomaScan v4 | `EUR` / `EUR` (`421k`) | **Out-of-sample UK `EUR`** | 26 | **14** | 12 (`86%`) | **14 (`100%`)** | **14 (`100%`)** | 13 | **0** | 11.5 |
+| `zhang_2022_35501419_EUR` | ARIC EA (`7.2k`) | SomaScan v4 | `EUR` / `EUR` (`421k`) | **Matched `EUR` (`cis`-only)** | 25 | **12** | 12 (`100%`) | **12 (`100%`)** | **12 (`100%`)** | 12 | **0** | 9.0 |
+| `zhang_2022_35501419_AFR` | ARIC AA (`1.9k`) | SomaScan v4 | `AFR` / **`AFR` (`6.6k`)** | **Matched finite-sample `AFR`** | 25 | **10** | 10 (`100%`) | **10 (`100%`)** | **10 (`100%`)** | 10 | **0** | **6.5** |
+| `ferkingstad_2021_34857953` | deCODE (`35.6k`) | SomaScan v4 | `EUR` / `EUR` (`421k`) | **Founder isolate → UK `EUR`** | 26 | **14** | 6 (`43%`) | **11 (`78.6%`)** | **14 (`100%`)** | 7 | 5 | 39.0 |
+| `sun_2023_37794186_ALL` | UKB (`52.4k`) | Olink PEA | `ALL` / `EUR` (`421k`) | **Multi-ancestry → UK `EUR`** | 31 | **30** | 13 (`43%`) | **23 (`76.7%`)** | **30 (`100%`)** | 12 | 9 | 49.5 |
 
-### Automated Metrics Computed by `scripts/compare_pqtl_studies.R`
-1. **`01_cis_method_summary.tsv`:** Per-study/assay `cis_gene` activation, `M_matched`, `p-ld` ($r^2 < 0.001$), `RSS` / `rRSS` / `CARMA` / `PolyFun` CS counts, `converged`, `iterations`, `max_V`, `lambda_bias`, `Q_art`, and `CARMA` outlier counts.
-2. **`02_cxcl8_technical_replicates.tsv`:** Pairwise PIP Pearson/Spearman correlation, lead-SNP / CS overlap, and multi-signal colocalisation ($\max PP.H_4$) across all 6 pairs of the 4 `CXCL8` Olink Explore panels in `EUR` vs `ALL`.
-3. **`03_pairwise_study_coloc_and_concordance.tsv`:** For every protein and every pair of studies (Olink vs SomaScan; `Sun EUR` vs `Ferkingstad`/`Pietzner`/`Zhang EUR`; `Sun EUR` vs `Zhang AFR`; `Zhang EUR` vs `Zhang AFR`), computes:
-   - Exact GRCh38 `GWAS_VARIANT_ID` intersection size,
-   - `SuSiE-rRSS` and `CARMA` PIP correlation across shared cis variants,
-   - Credible-set variant overlap (`n_shared_cs_pairs`), and
-   - Exact multi-signal **`coloc.susie` / `coloc.bf_bf` posterior $\max PP.H_4$ and $\max PP.H_3$** from `fit$lbf_variable[fit$sets$cs_index, ]` (distinguishing shared cis-regulatory pQTLs [$PP.H_4 \ge 0.8$] from platform-specific SomaScan aptamer epitope variants [$PP.H_3 \ge 0.8$]).
-4. **`comparison_report.html`:** Self-contained dark/light-mode HTML dashboard uniting the challenges summary, `Sun EUR` vs `ALL` comparison, `CXCL8` replicate concordance, and 6-study Olink vs SomaScan / `EUR` vs `AFR` colocalisation tables.
+> [!TIP]
+> **Key Validation of `Pan-UKB AFR` ($B = 6{,}637$):** Even with a `6,637`-individual African LD reference panel, matching `zhang_2022_35501419_AFR` to `Pan-UKB AFR` with `SuSiE-rRSS` (`R_finite = 6637`, `eb_mix`) achieved **10 / 10 (100%) convergence**, **0** prior-variance blow-ups ($V > 1$), and exact **10 / 10** agreement across all four Bayesian methods (`RSS`, `rRSS`, `CARMA`, `PolyFun`) in a median of **6.5** iterations.
+
+### 3.2 Complete 28-Protein × 6-Cohort `cis_gene` Discovery & Credible-Set Matrix
+
+Cells report `lead_LP : rRSS_CS / CARMA_CS (rRSS_converged)`, `no_cis (max_LP)` when $\max\text{LP} < 7.301$ ($P > 5 \times 10^{-8}$), or `—` when unmeasured on SomaScan v4:
+
+| Gene (`UniProt`) | Platform Category | `Sun EUR` (Olink) | `Sun ALL` (Olink) | `Ferkingstad` (deCODE) | `Pietzner` (Fenland) | `Zhang EUR` (ARIC EA) | `Zhang AFR` (ARIC AA) |
+|---|---|---|---|---|---|---|---|
+| **C1QA** (`P02745`) | Olink-only (absent SomaScan) | `478 : 0/7 (F)` | `696 : 2/9 (T)` | `—` | `—` | `—` | `—` |
+| **CA14** (`Q9ULX7`) | Olink-only (absent SomaScan) | `129 : 7/8 (T)` | `165 : 0/8 (F)` | `—` | `—` | `—` | `—` |
+| **RBP2** (`P50120`) | Olink-only (absent SomaScan) | `18 : 1/1 (T)` | `28 : 0/1 (F)` | `—` | `—` | `—` | `—` |
+| **TNFRSF10A** (`O00220`) | Olink `cis+` / SomaScan `cis-null` | `860 : 8/8 (T)` | `1302 : 10/10 (T)` | `no_cis (2.8)` | `no_cis (2.8)` | `no_cis (3.1)` | `no_cis (3.4)` |
+| **CSF1** (`P09603`) | Olink `cis+` / SomaScan `cis-null` | `137 : 3/3 (T)` | `186 : 3/3 (T)` | `no_cis (3.5)` | `no_cis (3.8)` | `no_cis (4.6)` | `no_cis (2.7)` |
+| **KRT19** (`P08727`) | Olink `cis+` / SomaScan `cis-null` | `81 : 2/2 (T)` | `124 : 2/2 (T)` | `no_cis (3.1)` | `no_cis (3.4)` | `no_cis (2.5)` | `no_cis (3.6)` |
+| **CA9** (`Q16790`) | Olink `cis+` / SomaScan `cis-null` | `52 : 3/4 (T)` | `82 : 8/6 (T)` | `no_cis (2.7)` | `no_cis (3.7)` | `no_cis (3.8)` | `no_cis (3.8)` |
+| **IL17C** (`Q9P0M4`) | Olink `cis+` / SomaScan `cis-null` | `52 : 4/4 (T)` | `80 : 6/4 (T)` | `no_cis (3.0)` | `no_cis (3.3)` | `no_cis (4.1)` | `no_cis (3.1)` |
+| **TNFRSF13B** (`O14836`) | Olink `cis+` / SomaScan `cis-null` | `44 : 3/4 (T)` | `66 : 1/5 (T)` | `no_cis (3.5)` | `no_cis (2.4)` | `no_cis (3.5)` | `no_cis (3.2)` |
+| **AGR2** (`O95994`) | Olink `cis+` / SomaScan `cis-null` | `43 : 1/1 (T)` | `57 : 1/1 (T)` | `no_cis (3.1)` | `no_cis (4.5)` | `no_cis (3.3)` | `no_cis (3.5)` |
+| **CCL20** (`P78556`) | Olink `cis+` / SomaScan `cis-null` | `34 : 1/1 (T)` | `43 : 2/2 (T)` | `no_cis (3.8)` | `no_cis (3.8)` | `no_cis (3.8)` | `no_cis (2.7)` |
+| **CCL2** (`P13500`) | Olink `cis+` / SomaScan `cis-null` | `15 : 1/1 (T)` | `24 : 2/3 (T)` | `no_cis (3.9)` | `no_cis (3.7)` | `no_cis (3.2)` | `no_cis (2.9)` |
+| **ADGRG2** (`Q8IZP9`, `chrX`) | Olink `cis+` / SomaScan `cis-null` | `8 : 2/2 (T)` | `17 : 3/4 (T)` | `no_cis (3.5)` | `no_cis (3.0)` | `—` (`chrX`) | `—` (`chrX`) |
+| **IFNG** (`P01579`) | Olink `EUR cis+` / SomaScan `cis-null` | `8 : 1/1 (T)` | `no_cis (6.5)` | `no_cis (2.4)` | `no_cis (3.9)` | `no_cis (3.5)` | `no_cis (3.9)` |
+| **MMP7** (`P09237`) | Shared `cis+` ($PP.H_4 = 1.00$) | `301 : 10/5 (T)` | `399 : 10/9 (T)` | `250 : 4/7 (T)` | `139 : 8/5 (T)` | `123 : 3/6 (T)` | `20 : 2/2 (T)` |
+| **TFF1** (`P04155`) | Shared `cis+` ($PP.H_4 = 1.00$) | `280 : 6/6 (T)` | `382 : 4/8 (T)` | `503 : 5/9 (T)` | `110 : 3/3 (T)` | `77 : 2/2 (T)` | `14 : 1/1 (T)` |
+| **IL2RA** (`P01589`) | Shared `cis+` ($PP.H_4 = 1.00$) | `1117 : 8/9 (T)` | `1590 : 8/8 (T)` | `20 : 4/3 (T)` | `11 : 1/1 (T)` | `15 : 1/1 (T)` | `no_cis (4.1)` |
+| **GDF15** (`Q99988`) | Shared `cis+` ($PP.H_4 \ge 0.995$) | `419 : 3/3 (T)` | `584 : 0/6 (F)` | `741 : 8/7 (T)` | `174 : 3/6 (T)` | `311 : 3/5 (T)` | `36 : 2/2 (T)` |
+| **REG4** (`Q9BYZ8`) | Shared `cis+` ($PP.H_4 = 0.95\text{–}1.00$) | `115 : 4/4 (T)` | `157 : 7/6 (T)` | `46 : 0/7 (F)` | `19 : 3/3 (T)` | `27 : 2/2 (T)` | `22 : 2/2 (T)` |
+| **MMP12** (`P39900`) | Shared `cis+` ($PP.H_4 = 0.97\text{–}1.00$) | `1094 : 6/9 (T)` | `1593 : 2/8 (T)` | `980 : 1/7 (T)` | `289 : 4/5 (T)` | `214 : 2/4 (T)` | `23 : 2/2 (T)` |
+| **CCL25** (`O15444`) | Shared `cis+` ($PP.H_4 = 0.92\text{–}1.00$) | `1756 : 10/6 (T)` | `2595 : 0/7 (F)` | `2429 : 0/8 (F)` | `584 : 3/3 (T)` | `382 : 3/3 (T)` | `21 : 3/3 (T)` |
+| **TFF3** (`Q07654`, 2 apt.) | Shared `cis+` ($PP.H_4 = 0.99$) | `108 : 6/7 (T)` | `156 : 5/6 (T)` | `27:3/5` + `18:1/7` | `14:3/3` + `35:3/3` | `no_cis (4.1)` ×2 | `8:1/1` + `no_cis` |
+| **TNFSF12** (`O43508`) | Shared `cis+` ($PP.H_4 = 0.92\text{–}1.00$) | `447 : 2/3 (T)` | `666 : 0/7 (F)` | `549 : 0/7 (F)` | `333 : 2/3 (T)` | `21 : 4/2 (T)` | `no_cis (6.2)` |
+| **TNFRSF6B** (`O95407`) | Shared `cis+` ($PP.H_4 = 0.98\text{–}0.99$) | `340 : 8/10 (T)` | `485 : 0/8 (F)` | `no_cis (5.7)` | `13 : 1/1 (T)` | `15 : 1/2 (T)` | `no_cis (4.1)` |
+| **CCL7** (`P80098`) | Shared `EUR cis+` ($PP.H_4 = 1.00$) | `46 : 3/4 (T)` | `56 : 0/5 (F)` | `1057 : 7/10 (T)` | `718 : 4/6 (T)` | `200 : 3/3 (T)` | `31 : 1/1 (T)` |
+| **TFF2** (`Q03403`) | Shared `cis+` (`AFR`-enriched LP=50) | `54 : 6/6 (T)` | `76 : 6/7 (T)` | `26 : 3/4 (T)` | `18 : 1/3 (T)` | `8 : 1/1 (T)` | **`50 : 1/1 (T)`** |
+| **CXCL8** (`P10145`, 4 OID) | Olink 4-panel `cis+` / weak deCODE | `24–27 : 2–4 CS` | `33–38 : 4 CS` | `7 : 1/1 (T)` | `no_cis (6.1)` | `no_cis (3.2)` | `no_cis (5.1)` |
+| **CCL3** (`P10147`) | **Platform-discordant ($PP.H_3 \ge 0.82$)** | `507 : 8/9 (T)` | `757 : 10/10 (T)` | `267 : 6/10 (T)` | `314 : 4/5 (T)` | `147 : 1/3 (T)` | `22 : 1/1 (T)` |
+
+### 3.3 Cross-Platform & Cross-Ancestry Biological Highlights
+1. **Why Olink `UKB-PPP EUR` Is Indispensable as Primary Discovery Panel:** Exactly **50% (14 / 28)** of the CRC candidate proteins (`3` unmeasured on SomaScan + `11` cis-null on SomaScan across up to `35,559` samples, most strikingly `TNFRSF10A` [`Sun EUR LP = 860` vs. SomaScan `LP = 2.8–3.4`], `CSF1` [`LP = 137` vs. `3.5–4.6`], and `KRT19` [`LP = 81` vs. `2.5–3.6`]) can **only** be instrumented in `cis` via Olink PEA.
+2. **Cross-Ancestry (`EUR` vs. `AFR`) Fine-Mapping Resolution & Replication:**
+   - Within SomaScan (`Zhang EUR` vs. `Zhang AFR`), **6** proteins colocalise directly across European and African ancestry with narrower `AFR` credible sets due to shorter African LD blocks: `CCL3` ($r_{\text{PIP}} = 0.9999, PP.H_4 = 1.0000$), `TFF1` ($r_{\text{PIP}} = 0.9639, PP.H_4 = 1.0000$, `1` CS in `AFR` vs. `6` in `Sun EUR`), `GDF15` ($r_{\text{PIP}} = 0.8718, PP.H_4 = 0.9997$), `CCL25` ($r_{\text{PIP}} = 0.7436, PP.H_4 = 0.9989$), `MMP7` ($r_{\text{PIP}} = 0.6534, PP.H_4 = 1.0000$), and `REG4` ($PP.H_4 = 0.9159$).
+   - Across **both platform AND ancestry** (`Sun EUR` Olink vs. `Zhang AFR` SomaScan), **8** proteins colocalise at $PP.H_4 > 0.92$: `MMP7` ($1.0000$), `TFF1` ($1.0000$), `GDF15` ($0.9951$), `TFF2` ($0.9920$ — notably stronger in `Zhang AFR` [`LP = 50`] than `Zhang EUR` [`LP = 8`] despite $4\times$ smaller sample size, pinpointing an African-enriched cis-regulatory allele), `TFF3` ($0.9853$), `MMP12` ($0.9677$), `REG4` ($0.9541$), and `CCL25` ($0.9241$).
+3. **Platform-Discordant Warning Flag at `CCL3` (`P10147`):**
+   - `Zhang EUR` and `Zhang AFR` SomaScan share the exact same lead variant ($r_{\text{PIP}} = 0.9999, PP.H_4 = 1.0000$), yet comparing `Sun EUR` (Olink `OID20610`) against `Ferkingstad`, `Pietzner`, `Zhang EUR`, or `Zhang AFR` (SomaScan `3040-59`) yields **`0` shared CS variants**, $r_{\text{PIP}} \approx 0.00$, and $PP.H_3 = 0.82\text{–}0.90$. Downstream CRC Mendelian randomisation and colocalisation at `CCL3` (`17q12` `CCL3`/`CCL3L1` copy-number locus) should treat Olink and SomaScan cis instruments separately rather than assuming cross-platform equivalence.
+
+---
+
+## 4. Practical Recommendations for Downstream CRC Genetic Analyses
+
+1. **Primary pQTL Instrument & Colocalisation Source:** Use **`sun_2023_37794186_EUR`** (`SuSiE-rRSS` credible sets and `fit$lbf_variable[fit$sets$cs_index, ]`, supplemented by `CARMA` for `C1QA`) as the primary cis-pQTL reference across all 28 proteins, with **`pietzner_2021_34648354`** (UK `EUR`), **`zhang_2022_35501419_EUR`**, and **`zhang_2022_35501419_AFR`** providing orthogonal SomaScan cross-platform and cross-ancestry validation for the 12 replicating cis-pQTLs.
+2. **Multi-Ancestry Outcome Colocalisation (e.g. `Huyghe 2021` CRC `noUKB`):** Because `Huyghe noUKB` lacks `AFR` cohorts and exhibits modest cis-window $|Z| \approx 1.5\text{–}6.5$ (so $|\Delta r \cdot Z| < 1$), pairing `sun_2023_37794186_EUR` `SuSiE-rRSS` log-BF vectors with either `SuSiE-rRSS` (`eb_mix` + two-tier gate) or LD-free Wakefield ABFs (`coloc.bf_bf`, Wallace 2021) on CRC avoids any cross-ancestry prior-variance inflation.
