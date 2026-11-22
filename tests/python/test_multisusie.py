@@ -157,6 +157,31 @@ class MultiSuSiEIntegrationTests(unittest.TestCase):
             self.assertEqual(int(srows[0]["single_snp_cs"]), 1)
             self.assertEqual(float(srows[0]["median_cs_size"]), 1.0)
 
+    def test_severe_ld_mismatch_negative_er2_never_crashes_spd_solver(self):
+        P = 15
+        R_eur = np.eye(P)
+        R_eur[0, 1] = R_eur[1, 0] = 0.99
+        R_afr = np.eye(P)
+        # Contradictory extreme effects on tightly correlated SNPs (drives ER2 < 0 without sigma2 floor)
+        b_mis = np.zeros(P); b_mis[0] = 2.5; b_mis[1] = -2.5
+        s_mis = np.full(P, 0.02)
+        b_afr = np.zeros(P); b_afr[0] = 0.3
+        s_afr = np.full(P, 0.05)
+        maf = np.full(P, 0.25)
+
+        out = fit_multisusie_locus(
+            cohort_inputs=[
+                {"study_id": "ferkingstad_2021_34857953", "ancestry": "EUR", "n": 35559, "b": b_mis, "s": s_mis, "maf": maf},
+                {"study_id": "zhang_2022_35501419_AFR", "ancestry": "AFR", "n": 1871, "b": b_afr, "s": s_afr, "maf": maf},
+            ],
+            R_by_ancestry={"EUR": R_eur, "AFR": R_afr},
+            L=5,
+            max_iter=50,
+        )
+        self.assertTrue(np.all(np.isfinite(out["pip"])))
+        self.assertTrue(np.all(np.isfinite(out["lbf_variable"])))
+        self.assertTrue(np.all(out["sigma2"] >= 1e-2))
+
 
 if __name__ == "__main__":
     unittest.main()

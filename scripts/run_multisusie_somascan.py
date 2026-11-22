@@ -98,46 +98,43 @@ def load_multisusie_backend() -> Any:
         ) from exc
 
     def _fast_lbf_no_moments(V, XTY, X_l2_arr, rho, residual_variance, float_type=np.float64):
-        YT_invD_Z = XTY / residual_variance[None, :]
-        A = rho * np.sqrt(np.outer(V, V))
-        inv_A = np.linalg.inv(A)
-        sign_a, logdetA = np.linalg.slogdet(A)
-        if sign_a <= 0:
-            raise np.linalg.LinAlgError("Prior covariance A is not positive definite")
-        Q_diag = (X_l2_arr / residual_variance[:, None]).T
-        K = A.shape[0]
-        M = np.broadcast_to(inv_A, (XTY.shape[0], K, K)).copy()
+        rv = np.maximum(np.asarray(residual_variance, dtype=np.float64), 1e-2)
+        V64 = np.maximum(np.asarray(V, dtype=np.float64), 0.0)
+        P, K = XTY.shape
+        z = np.asarray(XTY, dtype=np.float64) / rv[None, :]
+        q = np.maximum((np.asarray(X_l2_arr, dtype=np.float64) / rv[:, None]).T, 0.0)
+        s = np.sqrt(q)
+        A = np.asarray(rho, dtype=np.float64) * np.sqrt(np.outer(V64, V64))
+        B = (s[:, :, None] * s[:, None, :]) * A[None, :, :]
         diag_idx = np.arange(K)
-        M[:, diag_idx, diag_idx] += Q_diag
-        sign_m, logdet_M = np.linalg.slogdet(M)
-        if np.any(sign_m <= 0):
-            raise np.linalg.LinAlgError("Posterior precision M is not positive definite")
-        sol = np.linalg.solve(M, YT_invD_Z[..., None])[..., 0]
-        lbf = 0.5 * np.sum(YT_invD_Z * sol, axis=1) - 0.5 * (logdetA + logdet_M)
+        B[:, diag_idx, diag_idx] += 1.0
+        _, logdet_B = np.linalg.slogdet(B)
+        w = z @ A.T
+        v = np.linalg.solve(B, (s * w)[..., None])[..., 0]
+        u = w - ((s * v) @ A.T)
+        lbf = 0.5 * np.sum(z * u, axis=1) - 0.5 * logdet_B
         return lbf.astype(float_type, copy=False)
 
     def _fast_lbf_and_moments(V, XTY, X_l2_arr, rho, residual_variance, float_type=np.float64):
-        YT_invD_Z = XTY / residual_variance[None, :]
-        A = rho * np.sqrt(np.outer(V, V))
-        inv_A = np.linalg.inv(A)
-        sign_a, logdetA = np.linalg.slogdet(A)
-        if sign_a <= 0:
-            raise np.linalg.LinAlgError("Prior covariance A is not positive definite")
-        Q_diag = (X_l2_arr / residual_variance[:, None]).T
-        K = A.shape[0]
-        M = np.broadcast_to(inv_A, (XTY.shape[0], K, K)).copy()
+        rv = np.maximum(np.asarray(residual_variance, dtype=np.float64), 1e-2)
+        V64 = np.maximum(np.asarray(V, dtype=np.float64), 0.0)
+        P, K = XTY.shape
+        z = np.asarray(XTY, dtype=np.float64) / rv[None, :]
+        q = np.maximum((np.asarray(X_l2_arr, dtype=np.float64) / rv[:, None]).T, 0.0)
+        s = np.sqrt(q)
+        A = np.asarray(rho, dtype=np.float64) * np.sqrt(np.outer(V64, V64))
+        B = (s[:, :, None] * s[:, None, :]) * A[None, :, :]
         diag_idx = np.arange(K)
-        M[:, diag_idx, diag_idx] += Q_diag
-        sign_m, logdet_M = np.linalg.slogdet(M)
-        if np.any(sign_m <= 0):
-            raise np.linalg.LinAlgError("Posterior precision M is not positive definite")
-        sol = np.linalg.solve(M, YT_invD_Z[..., None])[..., 0]
-        lbf = 0.5 * np.sum(YT_invD_Z * sol, axis=1) - 0.5 * (logdetA + logdet_M)
-        AQ = A[None, :, :] * Q_diag[:, None, :]
-        post_mean = (YT_invD_Z @ A.T) - np.einsum("pij,pj->pi", AQ, sol)
-        Minv_AQT = np.linalg.solve(M, np.swapaxes(AQ, 1, 2))
-        post_cov = A[None, :, :] - np.matmul(AQ, A) + np.matmul(AQ, Minv_AQT)
-        pm = post_mean.T
+        B[:, diag_idx, diag_idx] += 1.0
+        _, logdet_B = np.linalg.slogdet(B)
+        w = z @ A.T
+        v = np.linalg.solve(B, (s * w)[..., None])[..., 0]
+        u = w - ((s * v) @ A.T)
+        lbf = 0.5 * np.sum(z * u, axis=1) - 0.5 * logdet_B
+        AS = A[None, :, :] * s[:, None, :]
+        Binv_AST = np.linalg.solve(B, np.swapaxes(AS, 1, 2))
+        post_cov = A[None, :, :] - np.matmul(AS, Binv_AST)
+        pm = u.T
         pm2 = np.maximum(np.moveaxis(post_cov, 0, 2) + pm[:, None, :] * pm[None, :, :], 0.0)
         return (
             lbf.astype(float_type, copy=False),
@@ -145,9 +142,16 @@ def load_multisusie_backend() -> Any:
             pm2.astype(float_type, copy=False),
         )
 
+    def _safe_estimate_residual_variance(
+        XTX_list, XTY_list, YTY_list, s_obj, X_l2_arr, population_sizes, float_type=np.float64
+    ):
+        sigma2_arr = np.asarray(s_obj.ER2, dtype=np.float64) / np.asarray(population_sizes, dtype=np.float64)
+        return np.maximum(sigma2_arr, 1e-2).astype(float_type, copy=False)
+
     mss.compute_lbf_no_moments = _fast_lbf_no_moments
     mss.compute_lbf_and_moments = _fast_lbf_and_moments
     mss.compute_lbf_and_moments_safe = _fast_lbf_and_moments
+    mss.estimate_residual_variance_func = _safe_estimate_residual_variance
     return mss
 
 
@@ -599,6 +603,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--L", type=int, default=10)
     p.add_argument("--fetch-workers", type=int, default=8)
     p.add_argument("--only-assay", default=None, help="Optional comma-separated gwas_id filter")
+    p.add_argument("--force", action="store_true", help="Recompute even if both MultiSuSiE arms already exist")
     return p.parse_args()
 
 
@@ -642,12 +647,21 @@ def main() -> int:
                 if found:
                     aptamer_cohorts.setdefault(gid, {})[study_id] = (found[0], found[1], anc, default_n)
 
-    print(f"[MultiSuSiE] Discovered {len(aptamer_cohorts)} SomaScan target aptamer groups across {gwas_root}")
+    print(f"[MultiSuSiE] Discovered {len(aptamer_cohorts)} SomaScan target aptamer groups across {gwas_root}", flush=True)
     from pyliftover import LiftOver
     lifter = LiftOver(str(chain))
 
     summary_log: list[dict[str, Any]] = []
     for idx_a, gwas_id in enumerate(sorted(aptamer_cohorts), start=1):
+        done_3 = (outdir / "somascan_multisusie_3cohort" / gwas_id / "methods" / "multisusie.rda").is_file() and (
+            outdir / "somascan_multisusie_3cohort" / gwas_id / "qc.json"
+        ).is_file()
+        done_4 = (outdir / "somascan_multisusie_4cohort" / gwas_id / "methods" / "multisusie.rda").is_file() and (
+            outdir / "somascan_multisusie_4cohort" / gwas_id / "qc.json"
+        ).is_file()
+        if not args.force and done_3 and done_4:
+            print(f"  [{idx_a:02d}/{len(aptamer_cohorts)}] {gwas_id:17s} : skipped (already complete)", flush=True)
+            continue
         t_assay0 = time.monotonic()
         uniprot = gwas_id.split("_", 1)[0]
         gene = read_gene_annotation(gene_annot, uniprot, strict=True)
@@ -899,7 +913,8 @@ def main() -> int:
             print(
                 f"  [{idx_a:02d}/{len(aptamer_cohorts)}] {arm_id:28s} {gwas_id:17s} ({gene['gene_symbol']:9s}) | "
                 f"K={len(arm_cohorts)} M={P_arm:5d} conv={fit_res['converged']}({fit_res['iterations']}it) "
-                f"CS={cs_n} sizes={cs_sz} ({arm_sec:.1f}s)"
+                f"CS={cs_n} sizes={cs_sz} ({arm_sec:.1f}s)",
+                flush=True,
             )
             summary_log.append({
                 "arm": arm_id,
