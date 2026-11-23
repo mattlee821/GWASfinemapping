@@ -80,6 +80,7 @@ Fine-mapping & reference options:
   --max-iter INT             Max SuSiE IBSS iterations for genome-wide loci (default: 100)
   --cis-max-iter INT         Max SuSiE IBSS iterations for cis_gene regions (default: 200)
   --susie-refine             Enable SuSiE CS refinement (opt-in; default: false)
+  --remove-kriging-outliers  Remove variants flagged by kriging allele-switch QC (logLR>2 & |z|>2) before fitting (opt-in; default: false — keep off for cis-pQTLs)
 
 Batch control & execution (matching GWASprocessing):
   --row-limit INT            Eligible rows to run (0 = all; default: 0)
@@ -130,6 +131,7 @@ MAX_LOCI=""
 MAX_ITER="100"
 CIS_MAX_ITER="200"
 SUSIE_REFINE="false"
+REMOVE_KRIGING_OUTLIERS="false"
 ROW_LIMIT="0"
 FORCE="false"
 DRY_RUN="false"
@@ -178,6 +180,7 @@ while [[ $# -gt 0 ]]; do
     --max-iter|--max_iter) MAX_ITER="$2"; shift 2 ;;
     --cis-max-iter|--cis_max_iter) CIS_MAX_ITER="$2"; shift 2 ;;
     --susie-refine|--susie_refine) SUSIE_REFINE="true"; shift ;;
+    --remove-kriging-outliers|--remove_kriging_outliers) REMOVE_KRIGING_OUTLIERS="true"; shift ;;
     --row-limit|--row_limit) ROW_LIMIT="$2"; shift 2 ;;
     --force) FORCE="true"; shift ;;
     --dry-run|--dry_run) DRY_RUN="true"; shift ;;
@@ -313,6 +316,7 @@ if [[ -z "$CONTAINER_ENGINE" && -z "${GWASFM_CONTAINER:-}" ]]; then
       --max-causal 10
       --cis-max-iter "$CIS_MAX_ITER"
       --cis-significance-lp "${CIS_SIG_LP:-0}"
+      --remove-kriging-outliers "$REMOVE_KRIGING_OUTLIERS"
       --row-limit "$ROW_LIMIT"
       --force "$FORCE"
       --dry-run "$DRY_RUN"
@@ -351,6 +355,7 @@ if [[ -z "$CONTAINER_ENGINE" && -z "${GWASFM_CONTAINER:-}" ]]; then
       --max-iter "$MAX_ITER"
       --cis-max-iter "$CIS_MAX_ITER"
       --susie-refine "$SUSIE_REFINE"
+      --remove-kriging-outliers "$REMOVE_KRIGING_OUTLIERS"
       --row-limit "$ROW_LIMIT"
       --force "$FORCE"
       --dry-run "$DRY_RUN"
@@ -415,6 +420,7 @@ NF_CMD=(
   --max_iter "$MAX_ITER"
   --cis_max_iter "$CIS_MAX_ITER"
   --susie_refine "$SUSIE_REFINE"
+  --remove_kriging_outliers "$REMOVE_KRIGING_OUTLIERS"
   --exclude_mhc "$EXCLUDE_MHC"
   --row_limit "$ROW_LIMIT"
   --force "$FORCE"

@@ -111,8 +111,16 @@ render_locus_png_base64 <- function(reg_id, rss_reg, rrss_reg, sig_lp = 7.30103)
   ) / 1e6
   lp <- as.numeric(df_rss$LP)
   pip_rss <- as.numeric(df_rss$PIP)
-  pip_rrss <- if (!is.null(df_rrss) && nrow(df_rrss) == nrow(df_rss)) {
-    as.numeric(df_rrss$PIP)
+  df_rrss_aligned <- if (!is.null(df_rrss) && nrow(df_rrss) == nrow(df_rss)) {
+    df_rrss
+  } else if (!is.null(df_rrss) && all(c("GWAS_VARIANT_ID") %in% c(names(df_rss), names(df_rrss)))) {
+    m_rrss_idx <- match(df_rss$GWAS_VARIANT_ID, df_rrss$GWAS_VARIANT_ID)
+    df_rrss[m_rrss_idx, , drop = FALSE]
+  } else {
+    NULL
+  }
+  pip_rrss <- if (!is.null(df_rrss_aligned)) {
+    as.numeric(df_rrss_aligned$PIP)
   } else {
     rep(NA_real_, nrow(df_rss))
   }
@@ -126,8 +134,8 @@ render_locus_png_base64 <- function(reg_id, rss_reg, rrss_reg, sig_lp = 7.30103)
   } else {
     rep(NA_character_, nrow(df_rss))
   }
-  cs_rrss <- if (!is.null(df_rrss) && "credible_set_id" %in% names(df_rrss)) {
-    as.character(df_rrss$credible_set_id)
+  cs_rrss <- if (!is.null(df_rrss_aligned) && "credible_set_id" %in% names(df_rrss_aligned)) {
+    as.character(df_rrss_aligned$credible_set_id)
   } else {
     rep(NA_character_, nrow(df_rss))
   }
@@ -213,28 +221,89 @@ render_locus_png_base64 <- function(reg_id, rss_reg, rrss_reg, sig_lp = 7.30103)
     )
   }
 
-  # Panel 3: Observed Z vs LD-expected Z diagnostic
-  z_obs <- as.numeric(df_rss$EZ)
-  z_exp <- if (!is.null(df_rrss) && "EXPECTED_Z" %in% names(df_rrss) &&
-               any(!is.na(df_rrss$EXPECTED_Z))) {
-    as.numeric(df_rrss$EXPECTED_Z)
-  } else if ("EXPECTED_Z" %in% names(df_rss)) {
-    as.numeric(df_rss$EXPECTED_Z)
+  # Panel 3: Observed Z vs LD-expected Z diagnostic (prefers model-free Kriging E[Z | Z_-j, R]
+  # so allele-switch / LD-mismatch outliers remain visible even when SuSiE fails or absorbs them)
+  z_obs_raw <- as.numeric(df_rss$EZ)
+  has_krig <- !is.null(df_rrss_aligned) &&
+    "KRIGING_EXP_Z" %in% names(df_rrss_aligned) &&
+    any(is.finite(df_rrss_aligned$KRIGING_EXP_Z))
+  if (has_krig) {
+    ss_vec <- if ("SS" %in% names(df_rss)) as.numeric(df_rss$SS[!is.na(df_rss$SS)]) else numeric()
+    n_pve <- if (!is.null(rrss_reg$result$provenance$parameters$effective_n)) {
+      as.numeric(rrss_reg$result$provenance$parameters$effective_n)
+    } else if (length(ss_vec) > 0L) {
+      min(ss_vec)
+    } else {
+      NA_real_
+    }
+    z_obs_plot <- if (is.finite(n_pve) && n_pve > 2) {
+      sqrt((n_pve - 1) / (z_obs_raw * z_obs_raw + n_pve - 2)) * z_obs_raw
+    } else {
+      z_obs_raw
+    }
+    z_exp_plot <- as.numeric(df_rrss_aligned$KRIGING_EXP_Z)
+    krig_out <- if ("KRIGING_OUTLIER" %in% names(df_rrss_aligned)) {
+      as.logical(df_rrss_aligned$KRIGING_OUTLIER)
+    } else {
+      rep(FALSE, nrow(df_rss))
+    }
+    s_hat_hdr <- suppressWarnings(as.numeric(rrss_reg$result$diagnostics$s_hat %||% NA_real_))
+    p3_xlab <- "Kriging conditional E[Z | Z_-j, R]"
+    p3_ylab <- "PVE-adjusted observed Z"
+    p3_main <- if (is.finite(s_hat_hdr)) {
+      sprintf("Observed vs Kriging expected Z (s = %.3f)", s_hat_hdr)
+    } else {
+      "Observed vs Kriging expected Z"
+    }
   } else {
-    rep(NA_real_, nrow(df_rss))
+    z_obs_plot <- z_obs_raw
+    z_exp_plot <- if (!is.null(df_rrss) && "EXPECTED_Z" %in% names(df_rrss) &&
+                      nrow(df_rrss) == nrow(df_rss) && any(!is.na(df_rrss$EXPECTED_Z))) {
+      as.numeric(df_rrss$EXPECTED_Z)
+    } else if ("EXPECTED_Z" %in% names(df_rss)) {
+      as.numeric(df_rss$EXPECTED_Z)
+    } else {
+      rep(NA_real_, nrow(df_rss))
+    }
+    krig_out <- rep(FALSE, nrow(df_rss))
+    p3_xlab <- "SuSiE LD-expected Z"
+    p3_ylab <- "Observed GWAS Z"
+    p3_main <- "Observed vs LD-expected Z"
   }
-  if (any(is.finite(z_obs[idx])) && any(is.finite(z_exp[idx]))) {
-    lim <- range(c(z_obs[idx], z_exp[idx]), finite = TRUE)
+  idx_p3 <- sort(unique(c(idx, which(!is.na(krig_out) & krig_out))))
+  if (any(is.finite(z_obs_plot[idx_p3])) && any(is.finite(z_exp_plot[idx_p3]))) {
+    lim <- range(c(z_obs_plot[idx_p3], z_exp_plot[idx_p3]), finite = TRUE)
+    col_p3 <- rep("#94a3b8", length(idx_p3))
+    if (length(cs_names) > 0L) {
+      for (k in seq_along(cs_names)) {
+        in_k <- (!is.na(cs_rss[idx_p3]) & cs_rss[idx_p3] == cs_names[[k]]) |
+          (!is.na(cs_rrss[idx_p3]) & cs_rrss[idx_p3] == cs_names[[k]])
+        col_p3[in_k] <- cs_cols[((k - 1L) %% length(cs_cols)) + 1L]
+      }
+    }
     graphics::plot(
-      z_exp[idx], z_obs[idx],
-      pch = 16, cex = 0.75, col = col_pip,
+      z_exp_plot[idx_p3], z_obs_plot[idx_p3],
+      pch = 16, cex = 0.75, col = col_p3,
       xlim = lim, ylim = lim,
-      xlab = "SuSiE LD-expected Z",
-      ylab = "Observed GWAS Z",
-      main = "Observed vs LD-expected Z",
+      xlab = p3_xlab,
+      ylab = p3_ylab,
+      main = p3_main,
       bty = "l"
     )
     graphics::abline(0, 1, lty = 2, col = "#475569")
+    out_in_p3 <- !is.na(krig_out[idx_p3]) & krig_out[idx_p3]
+    if (any(out_in_p3)) {
+      graphics::points(
+        z_exp_plot[idx_p3][out_in_p3],
+        z_obs_plot[idx_p3][out_in_p3],
+        pch = 4, cex = 1.15, lwd = 1.8, col = "#b91c1c"
+      )
+      graphics::legend(
+        "bottomright",
+        legend = sprintf("logLR>2 & |z|>2 (%d)", sum(krig_out, na.rm = TRUE)),
+        col = "#b91c1c", pch = 4, pt.cex = 1.0, pt.lwd = 1.8, bty = "n", cex = 0.8
+      )
+    }
   } else {
     graphics::plot.new()
     graphics::title(main = "Observed vs LD-expected Z (unavailable)")
@@ -330,6 +399,22 @@ locus_rows_html <- if (length(loci_list) == 0L) {
     }
     if (identical(m_rrss$q_art_eigen, "skipped_large_m")) {
       flags <- c(flags, badge("Q_art-skip", "neutral"))
+    }
+    rrss_shat <- suppressWarnings(as.numeric(m_rrss$s_hat %||% NA_real_))
+    if (is.finite(rrss_shat) && rrss_shat > 0.1) {
+      shat_tone <- if (identical(m_rrss$converged, FALSE) || isTRUE(m_rrss$SER_fallback)) "warn" else "neutral"
+      flags <- c(flags, badge(sprintf("s=%.2f", rrss_shat), shat_tone))
+    }
+    krig_cs_n <- suppressWarnings(as.integer(m_rrss$kriging_cs_outlier_count %||% 0L))
+    krig_tot_n <- suppressWarnings(as.integer(m_rrss$kriging_outlier_count %||% 0L))
+    krig_rm_n <- suppressWarnings(as.integer(m_rrss$kriging_outliers_removed %||% 0L))
+    if (!is.na(krig_cs_n) && krig_cs_n > 0L) {
+      flags <- c(flags, badge(paste0("Krig-CS-out:", krig_cs_n), "bad"))
+    } else if (!is.na(krig_tot_n) && krig_tot_n > 0L) {
+      flags <- c(flags, badge(paste0("Krig-out:", krig_tot_n), "warn"))
+    }
+    if (!is.na(krig_rm_n) && krig_rm_n > 0L) {
+      flags <- c(flags, badge(paste0("Krig-rm:", krig_rm_n), "info"))
     }
     if (!is.null(m_carma$outlier_count) && as.integer(m_carma$outlier_count) > 0L) {
       flags <- c(flags, badge(paste0("CARMA-out:", as.integer(m_carma$outlier_count)), "warn"))
@@ -431,6 +516,16 @@ if (length(all_reg_ids) > 0L) {
         top_v <- members[top_i, , drop = FALSE]
         cs_prior_v <- if ("prior_variance_V" %in% names(cs_df)) cs_df$prior_variance_V[[k]] else NA_real_
         cs_lbf <- if ("lbf" %in% names(cs_df)) cs_df$lbf[[k]] else NA_real_
+        cs_krig_n <- if ("kriging_outlier_count" %in% names(cs_df)) {
+          suppressWarnings(as.integer(cs_df$kriging_outlier_count[[k]]))
+        } else {
+          NA_integer_
+        }
+        cs_id_cell <- if (!is.na(cs_krig_n) && cs_krig_n > 0L) {
+          sprintf("%s %s", html_escape(cs_id), badge(paste0("Krig-out:", cs_krig_n), "bad"))
+        } else {
+          html_escape(cs_id)
+        }
         cs_rows <- c(
           cs_rows,
           sprintf(
@@ -452,7 +547,7 @@ if (length(all_reg_ids) > 0L) {
             ),
             html_escape(reg_id),
             html_escape(pair$label),
-            html_escape(cs_id),
+            cs_id_cell,
             fmt_int(nrow(members)),
             fmt_num(cs_df$min_abs_corr[[k]], 3L),
             fmt_num(cs_prior_v, 3L),

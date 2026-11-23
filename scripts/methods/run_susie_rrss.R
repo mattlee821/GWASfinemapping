@@ -36,6 +36,7 @@ effective_n           <- NULL
 max_causal            <- 10L
 max_iter              <- 100L
 susie_refine          <- FALSE
+remove_kriging_outliers <- FALSE
 coverage              <- 0.95
 min_abs_corr          <- 0.5
 r_mismatch            <- "eb_mix"
@@ -62,6 +63,7 @@ if (length(cli_args) > 0L) {
     else if (flag == "--max-causal") max_causal    <- as.integer(val)
     else if (flag == "--max-iter")   max_iter      <- as.integer(val)
     else if (flag == "--susie-refine") susie_refine <- tolower(val) %in% c("true", "1", "yes")
+    else if (flag == "--remove-kriging-outliers") remove_kriging_outliers <- tolower(val) %in% c("true", "1", "yes")
     else if (flag == "--coverage")   coverage      <- as.numeric(val)
     else if (flag == "--min-abs-corr") min_abs_corr <- as.numeric(val)
     else if (flag == "--r-mismatch") r_mismatch    <- val
@@ -141,7 +143,8 @@ result <- run_susie_rrss(
   max_iter = max_iter,
   refine = susie_refine,
   R_mismatch = r_mismatch,
-  allow_missing_n = TRUE
+  allow_missing_n = TRUE,
+  remove_kriging_outliers = remove_kriging_outliers
 )
 fit_seconds <- (proc.time() - t_fit_start)[["elapsed"]]
 

@@ -52,9 +52,10 @@ Fits `susieR` 2.0.0 (`L = 10`, `max_iter = 100` genome-wide / `200` `cis_gene`, 
 - **MHC BLAS acceleration:** Once finiteness is verified in C, `options(matprod = "blas")` bypasses R's single-threaded `O(M^2)` `ISNAN` pre-scan on every matrix-vector multiply, accelerating 35,000-variant MHC loci by 3x–9x across 16 OpenBLAS threads.
 
 ### 3.3 `susie-rrss` (`R/finemap_susie.R` — Recommended Primary Single-Study Method)
-Extends `susie-rss` in `susieR` 2.0.0 with two external-LD protections:
+Extends `susie-rss` in `susieR` 2.0.0 with external-LD protections and zero-copy pre-fit kriging diagnostics:
 - **Exact finite-sample shrinkage (`R_finite`):** Uses the exact Pan-UKB sample size ($B = 420{,}542$ for `EUR`, $6{,}637$ for `AFR`, $8{,}876$ for `CSA`, $2{,}709$ for `EAS`, $1{,}599$ for `MID`, $982$ for `AMR`).
 - **Always-on empirical-Bayes residual mixture (`R_mismatch = "eb_mix"`):** Kept active across **all** locus sizes $M$ so $O(M)$ Maller single-effect initialization and $\lambda_{\text{bias}}$ / `B_corrected` variance inflation protect wide 2 Mb `cis_gene` windows ($M \approx 5{,}000\text{–}20{,}000$), while optional $O(M^3)$ `Q_art` subspace eigendecomposition runs up to `eigen_max_variants = 20000L`.
+- **Zero-extra-$O(M^3)$ leave-one-out kriging & `DENTIST` diagnostics (`compute_kriging_from_eigen` + `gwasfm_eigen_diag_quadform`):** Reuses the single `eig <- eigen(R)` already computed for `Q_art` ($M \le 20{,}000$) to evaluate null-MLE `s_hat`, `KRIGING_EXP_Z`, `KRIGING_STD_RESID` (`DENTIST` $T_d = t_j^2$), `KRIGING_LOGLR`, and `KRIGING_OUTLIER` in $O(M^2)$ time with zero extra $M \times M$ matrices. Recorded non-destructively by default (`--remove-kriging-outliers false`); see [LD-Mismatch & Kriging Diagnostics](diagnostics-and-kriging.md) and the [Protein cis-pQTL Guide](protein-pqtl-example.md).
 
 ### 3.4 `carma` (`R/finemap_carma.R`)
 Fits shotgun stochastic search Spike-and-Slab Bayesian fine-mapping (`ZikunY/CARMA`, Poisson model-size prior, `L = 10`, deterministic seed) with Bayes-factor LD-discrepancy outlier detection (`outlier.switch = TRUE`, `outlier.BF.index = 1/3.2`), accelerated by a vectorised C/LAPACK `dsyev` batch evaluator (`gwasfm_carma_spike_slab_batch`). Especially resilient as an orthogonal rescue method when extreme $|Z|$ values trigger IBSS non-convergence.

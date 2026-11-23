@@ -274,8 +274,15 @@ def finalise_gwas(args: argparse.Namespace) -> Path:
             r.get("methods", {}).get("susie_rrss", {}).get("SER_fallback") is True
             or r.get("methods", {}).get("susie_rrss", {}).get("R_reliability_flag") is True
             or r.get("methods", {}).get("susie_rrss", {}).get("artifact_flag") is True
+            or int(r.get("methods", {}).get("susie_rrss", {}).get("kriging_cs_outlier_count") or 0) > 0
             or int(r.get("methods", {}).get("carma", {}).get("outlier_count") or 0) > 0
         )
+    ]
+    kriging_cs_flagged = [
+        r["region_id"]
+        for r in analyzed_loci
+        if r.get("status") == "analyzed"
+        and int(r.get("methods", {}).get("susie_rrss", {}).get("kriging_cs_outlier_count") or 0) > 0
     ]
 
     if n_analyzed == 0:
@@ -360,6 +367,7 @@ def finalise_gwas(args: argparse.Namespace) -> Path:
         "nonconverged_regions": nonconverged,
         "suppressed_credible_set_regions": suppressed_cs_regions,
         "mismatch_flagged_regions": mismatch_flagged,
+        "kriging_cs_outlier_regions": kriging_cs_flagged,
         "cis_gene": screen.get("cis_gene"),
         "mhc": screen.get("mhc"),
         "loci": analyzed_loci,

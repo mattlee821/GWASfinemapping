@@ -78,9 +78,11 @@ nav:
   - User Guide:
       - Getting Started: getting-started.md
       - Running Analyses & MultiSuSiE: running-analyses.md
+      - Protein cis-pQTL Guide: protein-pqtl-example.md
       - Outputs, Coloc & Interactive R: outputs-and-coloc.md
   - Methods & Reference:
       - Statistical Methods & QC: methods.md
+      - LD-Mismatch & Kriging Diagnostics: diagnostics-and-kriging.md
       - Architecture & Contracts: architecture.md
       - Pan-UKB LD Panels: panukb-ld.md
       - Reference Data: reference-data.md

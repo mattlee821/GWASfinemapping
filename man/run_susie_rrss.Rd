@@ -6,7 +6,7 @@ run_susie_rrss(variants, R, reference_sample_size, effective_n = NULL,
   L = 10L, coverage = 0.95, min_abs_corr = 0.5,
   max_iter = 100L, refine = FALSE, R_mismatch = "eb_mix",
   psd_max_variants = 5000L, eigen_max_variants = 20000L,
-  allow_missing_n = FALSE)
+  allow_missing_n = FALSE, remove_kriging_outliers = FALSE)
 }
 \arguments{
 \item{variants}{Validated variant data with signed \code{EZ} or valid
@@ -33,6 +33,13 @@ this size retain full \code{R_mismatch} (\code{lambda_bias} and SER
 initialization) while recording \code{q_art_eigen = "skipped_large_m"}.}
 \item{allow_missing_n}{Allow \code{z}-only fitting (\code{n = NULL}) when
 neither \code{SS} nor \code{effective_n} is available.}
+\item{remove_kriging_outliers}{Logical; if \code{TRUE}, remove variants
+flagged by the pre-fit kriging allele-switch check (\code{logLR > 2} and
+PVE-adjusted \code{|z| > 2}) before fitting \code{SuSiE-rRSS}. Defaults to
+\code{FALSE} so kriging diagnostics (\code{s_hat}, \code{KRIGING_EXP_Z},
+\code{KRIGING_STD_RESID}, \code{KRIGING_LOGLR}, \code{KRIGING_OUTLIER}) are
+recorded non-destructively while reusing the existing \code{eigen(R)}
+decomposition.}
 }
 \value{
 A list containing variant PIPs, credible-set summaries and membership,

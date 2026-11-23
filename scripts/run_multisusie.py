@@ -170,6 +170,159 @@ def build_rho_matrix(ancestries: list[str], rho_within: float = 0.95, rho_across
     return rho
 
 
+_DENTIST_CHISQ_5E8 = 29.716792804903356  # qchisq(5e-8, df=1, lower.tail=FALSE)
+_HALF_LOG_2PI = 0.5 * float(np.log(2.0 * np.pi))
+
+
+def _golden_minimize_s(d: np.ndarray, ztv2: np.ndarray, tol: float = 1e-9) -> float:
+    """Exact 1D minimizer of null-MLE objective 0.5 * sum(log((1-s)d + s) + ztv^2 / ((1-s)d + s)) on [0, 1]."""
+    inv_phi = (np.sqrt(5.0) - 1.0) / 2.0
+    a, b = 0.0, 1.0
+    c = b - inv_phi * (b - a)
+    x = a + inv_phi * (b - a)
+
+    def obj(s: float) -> float:
+        denom = (1.0 - s) * d + s
+        return 0.5 * float(np.sum(np.log(denom) + ztv2 / denom))
+
+    fc, fx = obj(c), obj(x)
+    while (b - a) > tol:
+        if fc < fx:
+            b, x, fx = x, c, fc
+            c = b - inv_phi * (b - a)
+            fc = obj(c)
+        else:
+            a, c, fc = c, x, fx
+            x = a + inv_phi * (b - a)
+            fx = obj(x)
+    s_mid = 0.5 * (a + b)
+    # Check boundary s = 0 explicitly (matches Brent behavior when minimum sits on 0)
+    if np.all(d > 0.0) and obj(0.0) <= obj(s_mid):
+        return 0.0
+    return float(s_mid)
+
+
+def _em_mixture_weights(log_lik_shifted: np.ndarray, max_iter: int = 500, tol: float = 1e-8) -> np.ndarray:
+    lik = np.exp(log_lik_shifted)
+    w = np.full(lik.shape[1], 1.0 / lik.shape[1], dtype=np.float64)
+    for _ in range(max_iter):
+        post = lik * w[None, :]
+        denom = np.maximum(post.sum(axis=1, keepdims=True), np.finfo(np.float64).tiny)
+        post /= denom
+        w_new = post.mean(axis=0)
+        if float(np.max(np.abs(w_new - w))) < tol:
+            return w_new
+        w = w_new
+    return w
+
+
+def compute_kriging_qc_numpy(
+    z_obs: np.ndarray,
+    R_obs: np.ndarray,
+    n: float,
+    r_tol: float = 1e-8,
+    max_variants: int = 20000,
+    precomputed_eigh: tuple[np.ndarray, np.ndarray] | None = None,
+) -> tuple[dict[str, Any], tuple[np.ndarray, np.ndarray] | None]:
+    """Single-eigh, precision-free port of susieR::estimate_s_rss('null-mle') + kriging_rss()."""
+    m = int(len(z_obs))
+    empty = {
+        "status": "skipped_too_few_variants",
+        "s_hat": None,
+        "z_adj": np.full(m, np.nan, dtype=np.float64),
+        "condmean": np.full(m, np.nan, dtype=np.float64),
+        "condvar": np.full(m, np.nan, dtype=np.float64),
+        "z_std_diff": np.full(m, np.nan, dtype=np.float64),
+        "logLR": np.full(m, np.nan, dtype=np.float64),
+        "outlier": np.zeros(m, dtype=bool),
+        "dentist_outlier": np.zeros(m, dtype=bool),
+    }
+    if m < 3:
+        return empty, precomputed_eigh
+    if m > max_variants:
+        empty["status"] = "skipped_large_m"
+        return empty, None
+
+    try:
+        z_clean = np.nan_to_num(np.asarray(z_obs, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+        if np.isfinite(n) and n > 2.0:
+            z_adj = np.sqrt((n - 1.0) / (z_clean * z_clean + n - 2.0)) * z_clean
+        else:
+            z_adj = z_clean.copy()
+
+        if precomputed_eigh is not None:
+            eig_vals, eig_vecs = precomputed_eigh
+        else:
+            R_sym = 0.5 * (R_obs + R_obs.T)
+            eig_vals, eig_vecs = np.linalg.eigh(R_sym)
+            precomputed_eigh = (eig_vals, eig_vecs)
+
+        d = np.where(eig_vals < r_tol, 0.0, eig_vals)
+        ztv = eig_vecs.T @ z_adj
+        ztv2 = ztv * ztv
+        s_hat = _golden_minimize_s(d, ztv2)
+        s_use = 0.8 if s_hat > 1.0 else max(s_hat, 0.0)
+
+        denom_s = (1.0 - s_use) * d + s_use
+        with np.errstate(divide="ignore", invalid="ignore"):
+            dinv = np.where(denom_s > 0.0, 1.0 / denom_s, 0.0)
+        dinv[~np.isfinite(dinv)] = 0.0
+
+        omega_z = eig_vecs @ (dinv * ztv)
+        diag_prec = np.zeros(m, dtype=np.float64)
+        for b0 in range(0, m, 512):
+            b1 = min(m, b0 + 512)
+            v_blk = eig_vecs[:, b0:b1]
+            diag_prec += (v_blk * v_blk) @ dinv[b0:b1]
+
+        valid_dp = np.isfinite(diag_prec) & (diag_prec > 0.0)
+        safe_dp = np.where(valid_dp, diag_prec, 1.0)
+        condvar = np.where(valid_dp, 1.0 / safe_dp, np.nan)
+        condmean = np.where(valid_dp, z_adj - omega_z * np.where(valid_dp, condvar, 0.0), 0.0)
+        z_std_diff = np.where(valid_dp, omega_z * np.sqrt(np.where(valid_dp, condvar, 0.0)), 0.0)
+
+        max_z2 = float(np.nanmax(z_std_diff * z_std_diff)) if m > 0 else 0.0
+        a_min = 0.8
+        a_max = 2.0 if (not np.isfinite(max_z2) or max_z2 < 1.0) else 2.0 * float(np.sqrt(max_z2))
+        npoint = int(np.ceil(np.log2(a_max / a_min) / np.log2(1.05)))
+        a_grid = (1.05 ** np.arange(-npoint, 1, dtype=np.float64)) * a_max
+
+        sd_mtx = np.outer(np.sqrt(np.maximum(np.where(valid_dp, condvar, 1.0), np.finfo(np.float64).eps)), a_grid)
+        log_sd = np.log(sd_mtx)
+
+        diff0 = (z_adj - condmean)[:, None]
+        llik0 = -_HALF_LOG_2PI - log_sd - 0.5 * (diff0 / sd_mtx) ** 2
+        fac0 = llik0.max(axis=1, keepdims=True)
+        llik0_shift = llik0 - fac0
+        w = _em_mixture_weights(llik0_shift)
+        logl0 = np.log(np.exp(llik0_shift) @ (w + 1e-15)) + fac0[:, 0]
+
+        diff1 = (z_adj + condmean)[:, None]
+        llik1 = -_HALF_LOG_2PI - log_sd - 0.5 * (diff1 / sd_mtx) ** 2
+        fac1 = llik1.max(axis=1, keepdims=True)
+        llik1_shift = llik1 - fac1
+        logl1 = np.log(np.exp(llik1_shift) @ (w + 1e-15)) + fac1[:, 0]
+
+        log_lr = np.where(valid_dp, logl1 - logl0, np.nan)
+        outlier = valid_dp & np.isfinite(log_lr) & (log_lr > 2.0) & (np.abs(z_adj) > 2.0)
+        dentist = valid_dp & np.isfinite(z_std_diff) & ((z_std_diff * z_std_diff) > _DENTIST_CHISQ_5E8)
+        return {
+            "status": "computed",
+            "s_hat": float(s_hat),
+            "z_adj": z_adj,
+            "condmean": condmean,
+            "condvar": condvar,
+            "z_std_diff": z_std_diff,
+            "logLR": log_lr,
+            "outlier": outlier,
+            "dentist_outlier": dentist,
+        }, precomputed_eigh
+    except Exception as exc:  # noqa: BLE001
+        empty["status"] = "failed"
+        empty["error"] = str(exc)
+        return empty, precomputed_eigh
+
+
 def fit_multisusie_locus(
     cohort_inputs: list[dict[str, Any]],
     R_by_ancestry: dict[str, np.ndarray],
@@ -180,8 +333,10 @@ def fit_multisusie_locus(
     single_pop_mac_thresh: float = 20.0,
     rho_within: float = 0.95,
     rho_across: float = 0.75,
+    remove_kriging_outliers: bool = False,
+    eigen_max_variants: int = 20000,
 ) -> dict[str, Any]:
-    """Run MultiSuSiE in float64 with exact lbf_variable recovery and two-tier CS gating."""
+    """Run MultiSuSiE in float64 with exact lbf_variable recovery, per-cohort kriging QC, and two-tier CS gating."""
     mss = load_multisusie_backend()
     K = len(cohort_inputs)
     if K == 0:
@@ -197,6 +352,11 @@ def fit_multisusie_locus(
     R_clean_list: list[np.ndarray] = []
     XTX_list: list[np.ndarray] = []
     XTY_list: list[np.ndarray] = []
+    eigh_cache: dict[tuple[str, bytes], tuple[np.ndarray, np.ndarray]] = {}
+    cohort_kriging_masks: list[np.ndarray] = []
+    cohort_kriging_summaries: list[dict[str, Any]] = []
+    union_kriging_outlier = np.zeros(P, dtype=bool)
+    kriging_censor_counts: list[int] = [0] * K
 
     for k, c in enumerate(cohort_inputs):
         anc = ancestries[k]
@@ -210,10 +370,62 @@ def fit_multisusie_locus(
             mac = 2.0 * n_k * np.minimum(maf, 1.0 - maf)
             valid_mask &= mac >= single_pop_mac_thresh
 
+        obs_idx = np.flatnonzero(valid_mask)
+        R_anc = np.asarray(R_by_ancestry[anc], dtype=np.float64)
+        cache_key = (anc, obs_idx.tobytes())
+        cached_eigh = eigh_cache.get(cache_key)
+        R_obs = R_anc[np.ix_(obs_idx, obs_idx)] if len(obs_idx) > 0 else np.zeros((0, 0), dtype=np.float64)
+        z_obs = (b[obs_idx] / s[obs_idx]) if len(obs_idx) > 0 else np.zeros(0, dtype=np.float64)
+        krig_k, new_eigh = compute_kriging_qc_numpy(
+            z_obs=z_obs,
+            R_obs=R_obs,
+            n=n_k,
+            max_variants=int(eigen_max_variants),
+            precomputed_eigh=cached_eigh,
+        )
+        if new_eigh is not None and cache_key not in eigh_cache:
+            eigh_cache[cache_key] = new_eigh
+
+        full_out_k = np.zeros(P, dtype=bool)
+        if len(obs_idx) > 0 and krig_k["status"] == "computed":
+            full_out_k[obs_idx] = krig_k["outlier"]
+        cohort_kriging_masks.append(full_out_k)
+        union_kriging_outlier |= full_out_k
+
+        if remove_kriging_outliers and np.any(full_out_k):
+            rem_valid = valid_mask & (~full_out_k)
+            if int(np.sum(rem_valid)) >= 2:
+                kriging_censor_counts[k] = int(np.sum(valid_mask & full_out_k))
+                valid_mask = rem_valid
+
+        max_std_r = (
+            round(float(np.nanmax(np.abs(krig_k["z_std_diff"]))), 4)
+            if krig_k["status"] == "computed" and np.any(np.isfinite(krig_k["z_std_diff"]))
+            else None
+        )
+        max_llr = (
+            round(float(np.nanmax(krig_k["logLR"])), 4)
+            if krig_k["status"] == "computed" and np.any(np.isfinite(krig_k["logLR"]))
+            else None
+        )
+        cohort_kriging_summaries.append({
+            "cohort_id": str(c["study_id"]),
+            "ancestry": anc,
+            "sample_size": int(round(n_k)),
+            "variants_evaluated": int(len(obs_idx)),
+            "kriging_status": krig_k["status"],
+            "s_hat": round(float(krig_k["s_hat"]), 6) if krig_k["s_hat"] is not None else None,
+            "kriging_outlier_count": int(np.sum(krig_k["outlier"])) if krig_k["status"] == "computed" else None,
+            "dentist_outlier_count": int(np.sum(krig_k["dentist_outlier"])) if krig_k["status"] == "computed" else None,
+            "max_abs_kriging_std_resid": max_std_r,
+            "max_kriging_loglr": max_llr,
+            "kriging_outliers_censored": kriging_censor_counts[k],
+        })
+
         b_use = np.where(valid_mask, b, np.nan)
         s_use = np.where(valid_mask, s, np.nan)
 
-        R_corr = np.asarray(R_by_ancestry[anc], dtype=np.float64).copy()
+        R_corr = R_anc.copy()
         censor_idx = ~valid_mask
         if np.any(censor_idx):
             R_corr[censor_idx, :] = 0.0
@@ -228,6 +440,7 @@ def fit_multisusie_locus(
             XTY[censor_idx] = 0.0
         XTX_list.append(R_work)
         XTY_list.append(XTY)
+    del eigh_cache
 
     fit = mss.susie_multi_ss(
         XTX_list=[m.copy() for m in XTX_list],
@@ -316,6 +529,7 @@ def fit_multisusie_locus(
                 min_c = float(np.min(tri))
                 mean_c = float(np.mean(tri))
                 med_c = float(np.median(tri))
+            cs_krig_n = int(np.sum(union_kriging_outlier[members_0])) if not remove_kriging_outliers else 0
             credible_sets.append({
                 "credible_set_id": f"L{eff_i + 1}",
                 "effect_index": int(eff_i + 1),
@@ -327,6 +541,7 @@ def fit_multisusie_locus(
                 "median_abs_corr": round(med_c, 6),
                 "max_std_prior_variance_V": round(max_v_slot, 6),
                 "lbf": round(float(fit.lbf[eff_i]), 6),
+                "kriging_outlier_count": cs_krig_n,
             })
 
         if dropped_v_gt_1 > 0:
@@ -335,6 +550,28 @@ def fit_multisusie_locus(
                 suppress_reason = "all_cs_dropped_prior_variance_gt_1"
             else:
                 suppress_reason = "partial_cs_dropped_prior_variance_gt_1"
+
+    all_cs_idx0 = sorted({i1 - 1 for cs in credible_sets for i1 in cs["indices_1based"]})
+    for k, csum in enumerate(cohort_kriging_summaries):
+        if csum["kriging_status"] == "computed":
+            csum["kriging_cs_outlier_count"] = (
+                int(np.sum(cohort_kriging_masks[k][all_cs_idx0]))
+                if (all_cs_idx0 and not remove_kriging_outliers)
+                else 0
+            )
+        else:
+            csum["kriging_cs_outlier_count"] = None
+
+    s_vals = [c["s_hat"] for c in cohort_kriging_summaries if c["s_hat"] is not None]
+    max_s_hat = round(float(max(s_vals)), 6) if s_vals else None
+    total_kriging_outliers = int(np.sum(union_kriging_outlier))
+    total_kriging_cs_outliers = (
+        int(np.sum(union_kriging_outlier[all_cs_idx0]))
+        if (all_cs_idx0 and not remove_kriging_outliers)
+        else 0
+    )
+    dent_vals = [c["dentist_outlier_count"] for c in cohort_kriging_summaries if c["dentist_outlier_count"] is not None]
+    total_dentist_outliers = int(sum(dent_vals)) if dent_vals else None
 
     max_cs_V = max((cs["max_std_prior_variance_V"] for cs in credible_sets), default=0.0)
     return {
@@ -345,6 +582,7 @@ def fit_multisusie_locus(
         "V": np.asarray(fit.V, dtype=np.float64),
         "std_V": std_V_matrix,
         "sigma2": np.asarray(fit.sigma2, dtype=np.float64),
+        "kriging_outlier": union_kriging_outlier,
         "converged": is_converged,
         "iterations": int(fit.niter),
         "credible_sets": credible_sets,
@@ -363,6 +601,13 @@ def fit_multisusie_locus(
             "unconverged_cs_dropped": int(dropped_cs),
             "dropped_implausible_v_cs": int(dropped_v_gt_1),
             "sigma2_by_cohort": [round(float(x), 6) for x in fit.sigma2],
+            "max_s_hat": max_s_hat,
+            "kriging_outlier_count": total_kriging_outliers,
+            "kriging_cs_outlier_count": total_kriging_cs_outliers,
+            "dentist_outlier_count": total_dentist_outliers,
+            "remove_kriging_outliers": bool(remove_kriging_outliers),
+            "kriging_outliers_censored_total": int(sum(kriging_censor_counts)),
+            "kriging_by_cohort": cohort_kriging_summaries,
         },
     }
 
@@ -382,6 +627,8 @@ def _render_multisusie_report_html(
         lead_i = cs["indices_1based"][0] - 1
         lead_v = variant_rows[lead_i]["GWAS_VARIANT_ID"]
         lead_pip = fit_out["pip"][lead_i]
+        cs_krig_n = int(cs.get("kriging_outlier_count") or 0)
+        cs_krig_cell = f"<td class='num'>{cs_krig_n}</td>"
         cs_rows.append(
             f"<tr><td><code>{html.escape(cs['credible_set_id'])}</code></td>"
             f"<td class='num'>{cs['size']}</td>"
@@ -389,9 +636,30 @@ def _render_multisusie_report_html(
             f"<td class='num'>{cs['min_abs_corr']:.3f}</td>"
             f"<td class='num'>{cs['max_std_prior_variance_V']:.4f}</td>"
             f"<td class='num'>{cs['lbf']:.2f}</td>"
+            f"{cs_krig_cell}"
             f"<td><code>{html.escape(lead_v)}</code> (PIP={lead_pip:.4f})</td></tr>"
         )
-    cs_body = "\n".join(cs_rows) or "<tr><td colspan='7' class='muted'>No 95% credible sets retained.</td></tr>"
+    cs_body = "\n".join(cs_rows) or "<tr><td colspan='8' class='muted'>No 95% credible sets retained.</td></tr>"
+
+    krig_rows = []
+    for kc in diag.get("kriging_by_cohort") or []:
+        s_str = f"{kc['s_hat']:.4f}" if kc.get("s_hat") is not None else "&mdash;"
+        ko_str = str(kc["kriging_outlier_count"]) if kc.get("kriging_outlier_count") is not None else "&mdash;"
+        kcs_str = str(kc["kriging_cs_outlier_count"]) if kc.get("kriging_cs_outlier_count") is not None else "&mdash;"
+        do_str = str(kc["dentist_outlier_count"]) if kc.get("dentist_outlier_count") is not None else "&mdash;"
+        mr_str = f"{kc['max_abs_kriging_std_resid']:.2f}" if kc.get("max_abs_kriging_std_resid") is not None else "&mdash;"
+        krig_rows.append(
+            f"<tr><td><code>{html.escape(str(kc['cohort_id']))}</code></td>"
+            f"<td>{html.escape(str(kc['ancestry']))}</td>"
+            f"<td class='num'>{int(kc['sample_size']):,}</td>"
+            f"<td class='num'>{int(kc['variants_evaluated']):,}</td>"
+            f"<td class='num'>{s_str}</td>"
+            f"<td class='num'>{ko_str}</td>"
+            f"<td class='num'>{kcs_str}</td>"
+            f"<td class='num'>{do_str}</td>"
+            f"<td class='num'>{mr_str}</td></tr>"
+        )
+    krig_body = "\n".join(krig_rows) or "<tr><td colspan='9' class='muted'>No per-cohort kriging diagnostics available.</td></tr>"
 
     top_idx = np.argsort(-fit_out["pip"])[:15]
     v_rows = []
@@ -428,10 +696,14 @@ th, td {{ padding:7px 10px; border-bottom:1px solid var(--border); text-align:le
   <strong>Variants matched:</strong> {len(variant_rows):,} &middot;
   <strong>Converged:</strong> {fit_out['converged']} ({fit_out['iterations']} iterations) &middot;
   <strong>Max standardized V:</strong> {diag['max_prior_variance_V']:.4f} &middot;
-  <strong>Dropped CSs:</strong> {diag['unconverged_cs_dropped']}
+  <strong>Dropped CSs:</strong> {diag['unconverged_cs_dropped']} &middot;
+  <strong>Max s_hat:</strong> {f"{diag['max_s_hat']:.4f}" if diag.get('max_s_hat') is not None else "n/a"} &middot;
+  <strong>Kriging CS outliers:</strong> {diag.get('kriging_cs_outlier_count', 0)}
 </div>
+<h2>Per-Cohort LD-Mismatch &amp; Kriging Diagnostics</h2>
+<div class="panel"><table><thead><tr><th>Cohort</th><th>LD Pop</th><th class="num">N</th><th class="num">Variants</th><th class="num">s_hat</th><th class="num">Flip Outliers (logLR&gt;2)</th><th class="num">In 95% CS</th><th class="num">DENTIST (P&lt;5e-8)</th><th class="num">Max |t_j|</th></tr></thead><tbody>{krig_body}</tbody></table></div>
 <h2>95% Credible Sets ({len(fit_out['credible_sets'])})</h2>
-<div class="panel"><table><thead><tr><th>CS</th><th class="num">Size</th><th class="num">Coverage</th><th class="num">Min |r|</th><th class="num">Max Std V</th><th class="num">LBF</th><th>Top Variant</th></tr></thead><tbody>{cs_body}</tbody></table></div>
+<div class="panel"><table><thead><tr><th>CS</th><th class="num">Size</th><th class="num">Coverage</th><th class="num">Min |r|</th><th class="num">Max Std V</th><th class="num">LBF</th><th class="num">Krig Out</th><th>Top Variant</th></tr></thead><tbody>{cs_body}</tbody></table></div>
 <h2>Top 15 Variants by PIP</h2>
 <div class="panel"><table><thead><tr><th>GRCh38 Variant</th><th>GRCh37 Panel ID</th><th class="num">Max LP</th><th class="num">MultiSuSiE PIP</th></tr></thead><tbody>{"".join(v_rows)}</tbody></table></div>
 </div></body></html>
@@ -543,9 +815,13 @@ def save_multisusie_study_output(
         "max_pip": round(float(np.max(fit_out["pip"])) if P > 0 else 0.0, 6),
         **diag,
     }
+    has_cs_krig_flag = int(diag.get("kriging_cs_outlier_count") or 0) > 0
     overall_status = (
         "PASS"
-        if fit_out["converged"] and not diag["credible_sets_suppressed"] and not diag["implausible_prior_variance_flag"]
+        if fit_out["converged"]
+        and not diag["credible_sets_suppressed"]
+        and not diag["implausible_prior_variance_flag"]
+        and not has_cs_krig_flag
         else "WARN_DIAGNOSTIC_FLAGS"
     )
     qc_payload = {
@@ -556,7 +832,10 @@ def save_multisusie_study_output(
         "analyzed_regions_count": 1,
         "total_credible_sets_multisusie": n_cs,
         "nonconverged_regions": [] if fit_out["converged"] else [region_id],
-        "mismatch_flagged_regions": [region_id] if diag["implausible_prior_variance_flag"] else [],
+        "mismatch_flagged_regions": (
+            [region_id] if (diag["implausible_prior_variance_flag"] or has_cs_krig_flag) else []
+        ),
+        "kriging_cs_outlier_regions": [region_id] if has_cs_krig_flag else [],
         "cis_gene": {
             "status": "analyzed_multisusie_cis",
             "uniprot_id": gene["uniprot_id"],
@@ -812,20 +1091,21 @@ def cmd_prepare(args: argparse.Namespace) -> int:
             }
             for c in cohorts
         ]
-        h_payload = json.dumps(
-            {
-                "mode": "multisusie_v1",
-                "cohorts": vcf_sig,
-                "gene": gene["uniprot_id"],
-                "min_maf": float(args.min_maf),
-                "gene_window_bp": int(args.gene_window_bp),
-                "max_causal": int(args.max_causal),
-                "cis_max_iter": int(args.cis_max_iter),
-                "cis_significance_lp": float(args.cis_significance_lp or 0.0),
-                "output_format": args.output_format,
-            },
-            sort_keys=True,
-        )
+        h_dict: dict[str, Any] = {
+            "mode": "multisusie_v1",
+            "cohorts": vcf_sig,
+            "gene": gene["uniprot_id"],
+            "min_maf": float(args.min_maf),
+            "gene_window_bp": int(args.gene_window_bp),
+            "max_causal": int(args.max_causal),
+            "cis_max_iter": int(args.cis_max_iter),
+            "cis_significance_lp": float(args.cis_significance_lp or 0.0),
+            "output_format": args.output_format,
+        }
+        rem_krig = parse_bool(args.remove_kriging_outliers, False)
+        if rem_krig:
+            h_dict["remove_kriging_outliers"] = True
+        h_payload = json.dumps(h_dict, sort_keys=True)
         shash = hashlib.sha256(h_payload.encode("utf-8")).hexdigest()[:16]
         rkey = f"{grp_sid}/{gid}"
         gwas_out = outdir / grp_sid / gid
@@ -885,6 +1165,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                     "max_causal": int(args.max_causal),
                     "cis_max_iter": int(args.cis_max_iter),
                     "cis_significance_lp": float(args.cis_significance_lp or 0.0),
+                    "remove_kriging_outliers": parse_bool(args.remove_kriging_outliers, False),
                     "report": report,
                 }
                 atomic_write_json(rows_dir / f"{rid}.json", payload)
@@ -1172,6 +1453,7 @@ def cmd_run_group(args: argparse.Namespace) -> int:
             max_iter=int(row.get("cis_max_iter", 200)),
             coverage=0.95,
             min_abs_corr=0.5,
+            remove_kriging_outliers=bool(row.get("remove_kriging_outliers", False)),
         )
         region_id = f"cis_{gene['gene_symbol']}_chr{chrom}_{shared_start}_{shared_end}"
         r_env = r_runtime_environment(PROJECT_ROOT)
@@ -1247,6 +1529,7 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--max-causal", type=int, default=10)
     prep.add_argument("--cis-max-iter", type=int, default=200)
     prep.add_argument("--cis-significance-lp", type=float, default=0.0)
+    prep.add_argument("--remove-kriging-outliers", default="false")
     prep.add_argument("--row-limit", type=int, default=0)
     prep.add_argument("--force", default="false")
     prep.add_argument("--dry-run", default="false")

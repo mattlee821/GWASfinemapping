@@ -131,9 +131,53 @@ SEXP gwasfm_carma_spike_slab_batch(SEXP model_mat, SEXP R_mat, SEXP z_vec,
     return out_sexp;
 }
 
+/*
+ * Compute diag(V * diag(dinv) * V^T) = sum_k V[i, k]^2 * dinv[k] for a
+ * column-major (p x m) eigenvector matrix V and length-m weight vector dinv,
+ * with zero intermediate matrix allocations and linear column-stride reads.
+ */
+SEXP gwasfm_eigen_diag_quadform(SEXP V_mat, SEXP dinv_vec) {
+    if (!isReal(V_mat) || !isMatrix(V_mat)) {
+        error("`V_mat` must be a double-precision numeric matrix.");
+    }
+    if (!isReal(dinv_vec)) {
+        error("`dinv_vec` must be a double-precision numeric vector.");
+    }
+    SEXP dim_v = getAttrib(V_mat, R_DimSymbol);
+    int p = INTEGER(dim_v)[0];
+    int m = INTEGER(dim_v)[1];
+    if (XLENGTH(dinv_vec) != (R_xlen_t)m) {
+        error("`length(dinv_vec)` must equal `ncol(V_mat)`.");
+    }
+
+    const double *V = REAL(V_mat);
+    const double *dinv = REAL(dinv_vec);
+    SEXP out_sexp = PROTECT(allocVector(REALSXP, p));
+    double *out = REAL(out_sexp);
+    for (int i = 0; i < p; ++i) {
+        out[i] = 0.0;
+    }
+
+    for (int k = 0; k < m; ++k) {
+        double dk = dinv[k];
+        if (dk == 0.0) {
+            continue;
+        }
+        const double *vcol = V + (R_xlen_t)k * p;
+        for (int i = 0; i < p; ++i) {
+            double vi = vcol[i];
+            out[i] += (vi * vi) * dk;
+        }
+    }
+
+    UNPROTECT(1);
+    return out_sexp;
+}
+
 static const R_CallMethodDef CallEntries[] = {
     {"gwasfm_frob_and_scale_inplace", (DL_FUNC) &gwasfm_frob_and_scale_inplace, 2},
     {"gwasfm_carma_spike_slab_batch", (DL_FUNC) &gwasfm_carma_spike_slab_batch, 5},
+    {"gwasfm_eigen_diag_quadform", (DL_FUNC) &gwasfm_eigen_diag_quadform, 2},
     {NULL, NULL, 0}
 };
 

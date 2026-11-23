@@ -175,6 +175,155 @@ compute_credible_sets_fast <- function(fit, R, coverage = 0.95,
   )
 }
 
+fit_kriging_mixture_em <- function(log_lik_shifted, max_iter = 500L, tol = 1e-8) {
+  lik <- exp(log_lik_shifted)
+  k <- ncol(lik)
+  w <- rep(1 / k, k)
+  for (it in seq_len(as.integer(max_iter))) {
+    post <- sweep(lik, 2L, w, `*`, check.margin = FALSE)
+    rsum <- rowSums(post)
+    rsum[rsum <= 0] <- .Machine$double.xmin
+    post <- post / rsum
+    w_new <- colMeans(post)
+    if (max(abs(w_new - w)) < tol) {
+      return(w_new)
+    }
+    w <- w_new
+  }
+  w
+}
+
+# Exact O(M^2)-time, O(M)-extra-memory implementation of susieR::estimate_s_rss(method = "null-mle")
+# and susieR::kriging_rss() reusing an already-computed correlation eigendecomposition `eig`.
+# Avoids susieR's redundant O(M^3) `eigen(R)` and O(M^3) `V %*% (t(V) * dinv)` (which allocates
+# three additional M x M matrices inside `susieR::kriging_rss`), using the exact identities:
+#   condvar_i    = 1 / Omega_ii
+#   condmean_i   = z_adj_i - (Omega z_adj)_i / Omega_ii
+#   z_std_diff_i = (Omega z_adj)_i / sqrt(Omega_ii)
+compute_kriging_from_eigen <- function(z, n = NULL, eig, r_tol = 1e-8) {
+  p <- length(z)
+  empty_res <- function(status_label) {
+    list(
+      status = status_label,
+      s_hat = NA_real_,
+      z_adj = rep(NA_real_, p),
+      condmean = rep(NA_real_, p),
+      condvar = rep(NA_real_, p),
+      z_std_diff = rep(NA_real_, p),
+      logLR = rep(NA_real_, p),
+      outlier = rep(FALSE, p),
+      dentist_outlier = rep(FALSE, p)
+    )
+  }
+  if (p < 3L) {
+    return(empty_res("skipped_too_few_variants"))
+  }
+  if (is.null(eig) || is.null(eig$values) || is.null(eig$vectors) ||
+      length(eig$values) != p || nrow(eig$vectors) != p || ncol(eig$vectors) != p) {
+    return(empty_res("skipped_missing_eigen"))
+  }
+
+  tryCatch({
+    z_clean <- as.numeric(z)
+    z_clean[!is.finite(z_clean)] <- 0
+    if (!is.null(n) && is.finite(n) && n > 1) {
+      adj <- (n - 1) / (z_clean * z_clean + n - 2)
+      z_adj <- sqrt(adj) * z_clean
+    } else {
+      z_adj <- z_clean
+    }
+
+    V <- eig$vectors
+    d <- as.numeric(eig$values)
+    d[!is.finite(d) | d < r_tol] <- 0
+
+    if (all(is.finite(z_adj))) {
+      old_mp <- options(matprod = "blas")
+      on.exit(options(old_mp), add = TRUE)
+    }
+
+    ztv <- as.numeric(crossprod(V, z_adj))
+    ztv2 <- ztv * ztv
+    negloglik <- function(s) {
+      denom <- (1 - s) * d + s
+      0.5 * sum(log(denom)) + 0.5 * sum(ztv2 / denom)
+    }
+    s_hat <- as.numeric(stats::optim(
+      0.5,
+      fn = negloglik,
+      method = "Brent",
+      lower = 0,
+      upper = 1
+    )$par)
+
+    s_use <- if (s_hat > 1) 0.8 else max(s_hat, 0)
+    dinv <- 1 / ((1 - s_use) * d + s_use)
+    dinv[!is.finite(dinv)] <- 0
+
+    omega_z <- as.numeric(V %*% (dinv * ztv))
+    diag_prec <- if (is.loaded("gwasfm_eigen_diag_quadform", PACKAGE = "gwasfinemapping")) {
+      .Call("gwasfm_eigen_diag_quadform", V, as.numeric(dinv), PACKAGE = "gwasfinemapping")
+    } else {
+      dp <- numeric(p)
+      for (b in seq.int(1L, p, by = 512L)) {
+        idx <- b:min(p, b + 511L)
+        dp <- dp + drop((V[, idx, drop = FALSE]^2) %*% dinv[idx])
+      }
+      dp
+    }
+
+    valid_dp <- is.finite(diag_prec) & (diag_prec > 0)
+    condvar <- ifelse(valid_dp, 1 / diag_prec, NA_real_)
+    condmean <- ifelse(valid_dp, z_adj - omega_z * condvar, 0)
+    z_std_diff <- ifelse(valid_dp, omega_z * sqrt(condvar), 0)
+
+    a_min <- 0.8
+    max_z2 <- max(z_std_diff * z_std_diff, na.rm = TRUE)
+    a_max <- if (!is.finite(max_z2) || max_z2 < 1) 2 else 2 * sqrt(max_z2)
+    npoint <- ceiling(log2(a_max / a_min) / log2(1.05))
+    a_grid <- 1.05^(seq(-npoint, 0)) * a_max
+
+    sd_mtx <- outer(sqrt(pmax( ifelse(is.na(condvar), 1, condvar), .Machine$double.eps )), a_grid)
+    matrix_llik0 <- stats::dnorm(z_adj - condmean, sd = sd_mtx, log = TRUE)
+    lfactors0 <- apply(matrix_llik0, 1L, max)
+    matrix_llik0 <- matrix_llik0 - lfactors0
+
+    w <- if (requireNamespace("mixsqp", quietly = TRUE)) {
+      mixsqp::mixsqp(matrix_llik0, log = TRUE, control = list(verbose = FALSE))$x
+    } else {
+      fit_kriging_mixture_em(matrix_llik0)
+    }
+
+    logl0mix <- drop(log(exp(matrix_llik0) %*% (w + 1e-15))) + lfactors0
+    matrix_llik1 <- stats::dnorm(z_adj + condmean, sd = sd_mtx, log = TRUE)
+    lfactors1 <- apply(matrix_llik1, 1L, max)
+    matrix_llik1 <- matrix_llik1 - lfactors1
+    logl1mix <- drop(log(exp(matrix_llik1) %*% (w + 1e-15))) + lfactors1
+    logLR <- as.numeric(logl1mix - logl0mix)
+    logLR[!valid_dp] <- NA_real_
+
+    dentist_chisq_thr <- stats::qchisq(5e-8, df = 1, lower.tail = FALSE)
+    outlier <- !is.na(logLR) & is.finite(logLR) & (logLR > 2) & (abs(z_adj) > 2)
+    dentist_outlier <- valid_dp & is.finite(z_std_diff) & ((z_std_diff * z_std_diff) > dentist_chisq_thr)
+
+    list(
+      status = "computed",
+      s_hat = s_hat,
+      z_adj = as.numeric(z_adj),
+      condmean = as.numeric(condmean),
+      condvar = as.numeric(condvar),
+      z_std_diff = as.numeric(z_std_diff),
+      logLR = as.numeric(logLR),
+      outlier = as.logical(outlier),
+      dentist_outlier = as.logical(dentist_outlier)
+    )
+  }, error = function(e) {
+    res <- empty_res("failed")
+    res$error <- conditionMessage(e)
+    res
+  })
+}
+
 fit_susie_from_prescaled_xtx <- function(z, XtX, n, L, coverage, max_iter,
                                          refine, prior_weights = NULL,
                                          R_finite = NULL, R_mismatch = "none",
@@ -340,9 +489,15 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
                             psd_max_variants = 5000L,
                             eigen_max_variants = 20000L,
                             prior_weights = NULL,
-                            allow_missing_n = FALSE) {
+                            allow_missing_n = FALSE,
+                            remove_kriging_outliers = FALSE) {
   if (!method_id %in% c("susie_rss", "susie_rrss", "polyfun")) {
     stop("Unsupported SuSiE method identifier.", call. = FALSE)
+  }
+  if (!is.logical(remove_kriging_outliers) || length(remove_kriging_outliers) != 1L ||
+      is.na(remove_kriging_outliers)) {
+    stop("`remove_kriging_outliers` must be one non-missing logical value.",
+         call. = FALSE)
   }
   if (length(eigen_max_variants) != 1L || !is.numeric(eigen_max_variants) ||
       is.na(eigen_max_variants) || eigen_max_variants < 1L) {
@@ -413,7 +568,6 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
   frob_sq_attr <- attr(R, "frob_sq")
 
   will_compute_eigen_r <- (method_id == "susie_rrss") &&
-    (R_mismatch != "none") &&
     (nrow(R) <= as.integer(eigen_max_variants))
 
   ld_check <- validate_ld_matrix(
@@ -425,7 +579,8 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
   psd_status <- attr(ld_check, "psd_status") %||% "passed"
 
   precomputed_eigen <- NULL
-  if (method_id == "susie_rrss" && R_mismatch != "none") {
+  kriging_res <- NULL
+  if (method_id == "susie_rrss") {
     if (will_compute_eigen_r) {
       eig <- eigen(R, symmetric = TRUE)
       eig$values <- eig$values / ld_scale
@@ -435,16 +590,100 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
              call. = FALSE)
       }
       psd_status <- "passed"
-      precomputed_eigen <- eig
-      q_art_eigen_status <- "computed"
-    } else {
-      # Keep R_mismatch ("eb_mix" / "eb") active for SER init + lambda_bias + B_corrected
-      # at ALL region sizes while skipping O(M^3) Q_art eigendecomposition above eigen_max_variants.
-      precomputed_eigen <- list(
-        values = 1.0,
-        vectors = matrix(0.0, nrow = nrow(R), ncol = 1L)
+      kriging_res <- compute_kriging_from_eigen(
+        z = variants$EZ,
+        n = n$value,
+        eig = eig,
+        r_tol = 1e-8
       )
-      q_art_eigen_status <- "skipped_large_m"
+      if (R_mismatch != "none") {
+        precomputed_eigen <- eig
+        q_art_eigen_status <- "computed"
+      } else {
+        rm(eig)
+      }
+    } else {
+      kriging_res <- list(
+        status = "skipped_large_m",
+        s_hat = NA_real_,
+        z_adj = rep(NA_real_, nrow(variants)),
+        condmean = rep(NA_real_, nrow(variants)),
+        condvar = rep(NA_real_, nrow(variants)),
+        z_std_diff = rep(NA_real_, nrow(variants)),
+        logLR = rep(NA_real_, nrow(variants)),
+        outlier = rep(FALSE, nrow(variants)),
+        dentist_outlier = rep(FALSE, nrow(variants))
+      )
+      if (R_mismatch != "none") {
+        # Keep R_mismatch ("eb_mix" / "eb") active for SER init + lambda_bias + B_corrected
+        # at ALL region sizes while skipping O(M^3) Q_art eigendecomposition above eigen_max_variants.
+        precomputed_eigen <- list(
+          values = 1.0,
+          vectors = matrix(0.0, nrow = nrow(R), ncol = 1L)
+        )
+        q_art_eigen_status <- "skipped_large_m"
+      }
+    }
+  }
+
+  kriging_initial_outlier_ids <- if (!is.null(kriging_res) && any(kriging_res$outlier)) {
+    gwas_ids[kriging_res$outlier]
+  } else {
+    character()
+  }
+  kriging_initial_outlier_count <- as.integer(length(kriging_initial_outlier_ids))
+  kriging_initial_dentist_count <- if (!is.null(kriging_res) &&
+                                       identical(kriging_res$status, "computed")) {
+    as.integer(sum(kriging_res$dentist_outlier, na.rm = TRUE))
+  } else {
+    NA_integer_
+  }
+  kriging_max_abs_std_resid <- if (!is.null(kriging_res) && any(is.finite(kriging_res$z_std_diff))) {
+    max(abs(kriging_res$z_std_diff), na.rm = TRUE)
+  } else {
+    NA_real_
+  }
+  kriging_max_loglr <- if (!is.null(kriging_res) && any(is.finite(kriging_res$logLR))) {
+    max(kriging_res$logLR, na.rm = TRUE)
+  } else {
+    NA_real_
+  }
+  kriging_outliers_removed <- 0L
+  kriging_removed_ids <- character()
+
+  if (method_id == "susie_rrss" && isTRUE(remove_kriging_outliers) &&
+      !is.null(kriging_res) && any(kriging_res$outlier)) {
+    keep_k <- !kriging_res$outlier
+    if (sum(keep_k) >= 2L) {
+      kriging_outliers_removed <- as.integer(sum(!keep_k))
+      kriging_removed_ids <- gwas_ids[!keep_k]
+      variants <- variants[keep_k, , drop = FALSE]
+      ids <- ids[keep_k]
+      gwas_ids <- gwas_ids[keep_k]
+      if (!is.null(prior_weights)) {
+        prior_weights <- prior_weights[keep_k]
+        prior_weights <- prior_weights / sum(prior_weights)
+      }
+      R <- R[keep_k, keep_k, drop = FALSE]
+      attr(R, "ld_scale") <- ld_scale
+      frob_sq_attr <- NULL
+      if (R_mismatch != "none") {
+        if (nrow(R) <= as.integer(eigen_max_variants)) {
+          eig_sub <- eigen(R, symmetric = TRUE)
+          eig_sub$values <- eig_sub$values / ld_scale
+          precomputed_eigen <- eig_sub
+          q_art_eigen_status <- "computed"
+        } else {
+          precomputed_eigen <- list(
+            values = 1.0,
+            vectors = matrix(0.0, nrow = nrow(R), ncol = 1L)
+          )
+          q_art_eigen_status <- "skipped_large_m"
+        }
+      }
+      for (k_slot in c("z_adj", "condmean", "condvar", "z_std_diff", "logLR", "outlier", "dentist_outlier")) {
+        kriging_res[[k_slot]] <- kriging_res[[k_slot]][keep_k]
+      }
     }
   }
 
@@ -546,8 +785,29 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
   fit <- name_susie_fit_variants(fit, gwas_ids)
 
   r_rel_warn <- isTRUE(fit$R_finite_diagnostics$R_reliability_flag)
+  cs_kriging_counts <- if (length(cs$cs) > 0L && !is.null(kriging_res) &&
+                           identical(kriging_res$status, "computed")) {
+    vapply(cs$cs, function(m_idx) {
+      as.integer(sum(kriging_res$outlier[as.integer(m_idx)], na.rm = TRUE))
+    }, integer(1))
+  } else if (length(cs$cs) > 0L) {
+    rep(NA_integer_, length(cs$cs))
+  } else {
+    integer()
+  }
+  kriging_cs_outlier_total <- if (!is.null(kriging_res) && identical(kriging_res$status, "computed")) {
+    if (length(cs$cs) > 0L) {
+      all_cs_members <- unique(unlist(lapply(cs$cs, as.integer), use.names = FALSE))
+      as.integer(sum(kriging_res$outlier[all_cs_members], na.rm = TRUE))
+    } else {
+      0L
+    }
+  } else {
+    NA_integer_
+  }
+
   credible_sets <- if (length(cs$cs) == 0L) {
-    data.frame(
+    base_cs_df <- data.frame(
       credible_set_id = character(),
       effect_index = integer(),
       size = integer(),
@@ -560,9 +820,18 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
       ld_mismatch_warning = logical(),
       stringsAsFactors = FALSE
     )
+    if (method_id == "susie_rrss") {
+      base_cs_df$kriging_outlier_count <- integer()
+    }
+    base_cs_df
   } else {
     eff_idx <- as.integer(cs$cs_index)
-    data.frame(
+    cs_warn_vec <- if (method_id == "susie_rrss") {
+      r_rel_warn | (!is.na(cs_kriging_counts) & cs_kriging_counts > 0L)
+    } else {
+      rep(r_rel_warn, length(eff_idx))
+    }
+    base_cs_df <- data.frame(
       credible_set_id = names(cs$cs),
       effect_index = eff_idx,
       size = as.integer(lengths(cs$cs)),
@@ -572,9 +841,13 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
       median_abs_corr = cs$purity$median.abs.corr,
       prior_variance_V = if (length(V_vec) >= max(eff_idx)) as.numeric(V_vec[eff_idx]) else rep(NA_real_, length(eff_idx)),
       lbf = if (length(lbf_vec) >= max(eff_idx)) as.numeric(lbf_vec[eff_idx]) else rep(NA_real_, length(eff_idx)),
-      ld_mismatch_warning = rep(r_rel_warn, length(eff_idx)),
+      ld_mismatch_warning = cs_warn_vec,
       stringsAsFactors = FALSE
     )
+    if (method_id == "susie_rrss") {
+      base_cs_df$kriging_outlier_count <- cs_kriging_counts
+    }
+    base_cs_df
   }
   membership <- if (length(cs$cs) == 0L) {
     data.frame(
@@ -644,6 +917,25 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
     R_sensitivity_flag = fit$R_sensitivity_flag %||% NA,
     R_finite_diagnostics = fit$R_finite_diagnostics
   )
+  if (method_id == "susie_rrss" && !is.null(kriging_res)) {
+    diagnostics$kriging_status <- kriging_res$status
+    diagnostics$s_hat <- kriging_res$s_hat
+    diagnostics$kriging_outlier_count <- if (identical(kriging_res$status, "computed")) {
+      kriging_initial_outlier_count
+    } else {
+      NA_integer_
+    }
+    diagnostics$kriging_cs_outlier_count <- kriging_cs_outlier_total
+    diagnostics$dentist_outlier_count <- kriging_initial_dentist_count
+    diagnostics$max_abs_kriging_std_resid <- kriging_max_abs_std_resid
+    diagnostics$max_kriging_loglr <- kriging_max_loglr
+    diagnostics$remove_kriging_outliers <- isTRUE(remove_kriging_outliers)
+    diagnostics$kriging_outliers_removed <- kriging_outliers_removed
+    diagnostics$kriging_outlier_gwas_variant_ids <- utils::head(kriging_initial_outlier_ids, 50L)
+    if (kriging_outliers_removed > 0L) {
+      diagnostics$kriging_removed_gwas_variant_ids <- utils::head(kriging_removed_ids, 50L)
+    }
+  }
 
   lead_idx <- which.max(
     ifelse(is.na(variants$LP), -Inf, as.numeric(variants$LP))
@@ -675,7 +967,32 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
   variant_results$method_id <- method_id
   variant_results$PIP <- as.numeric(fit$pip)
   variant_results$EXPECTED_Z <- expected_z
+  if (method_id == "susie_rrss" && !is.null(kriging_res)) {
+    variant_results$KRIGING_EXP_Z <- kriging_res$condmean
+    variant_results$KRIGING_STD_RESID <- kriging_res$z_std_diff
+    variant_results$KRIGING_LOGLR <- kriging_res$logLR
+    variant_results$KRIGING_OUTLIER <- kriging_res$outlier
+  }
   variant_results$credible_set_id <- cs_lookup
+
+  prov_params <- list(
+    L = as.integer(L),
+    coverage = coverage,
+    min_abs_corr = min_abs_corr,
+    max_iter = as.integer(max_iter),
+    refine = refine,
+    effective_n = n$value,
+    effective_n_source = n$source,
+    effective_n_summary = n$summary,
+    R_finite = R_finite,
+    R_mismatch = R_mismatch,
+    R_mismatch_requested = r_mismatch_requested,
+    psd_max_variants = as.integer(psd_max_variants),
+    eigen_max_variants = as.integer(eigen_max_variants)
+  )
+  if (method_id == "susie_rrss") {
+    prov_params$remove_kriging_outliers <- isTRUE(remove_kriging_outliers)
+  }
 
   list(
     variants = variant_results,
@@ -685,21 +1002,7 @@ run_susie_model <- function(variants, R, method_id, effective_n = NULL,
     provenance = list(
       method_id = method_id,
       method_version = as.character(utils::packageVersion("susieR")),
-      parameters = list(
-        L = as.integer(L),
-        coverage = coverage,
-        min_abs_corr = min_abs_corr,
-        max_iter = as.integer(max_iter),
-        refine = refine,
-        effective_n = n$value,
-        effective_n_source = n$source,
-        effective_n_summary = n$summary,
-        R_finite = R_finite,
-        R_mismatch = R_mismatch,
-        R_mismatch_requested = r_mismatch_requested,
-        psd_max_variants = as.integer(psd_max_variants),
-        eigen_max_variants = as.integer(eigen_max_variants)
-      )
+      parameters = prov_params
     ),
     fit = fit
   )
@@ -735,7 +1038,8 @@ run_susie_rrss <- function(variants, R, reference_sample_size,
                            refine = FALSE, R_mismatch = "eb_mix",
                            psd_max_variants = 5000L,
                            eigen_max_variants = 20000L,
-                           allow_missing_n = FALSE) {
+                           allow_missing_n = FALSE,
+                           remove_kriging_outliers = FALSE) {
   run_susie_model(
     variants = variants,
     R = R,
@@ -750,6 +1054,7 @@ run_susie_rrss <- function(variants, R, reference_sample_size,
     R_mismatch = R_mismatch,
     psd_max_variants = psd_max_variants,
     eigen_max_variants = eigen_max_variants,
-    allow_missing_n = allow_missing_n
+    allow_missing_n = allow_missing_n,
+    remove_kriging_outliers = remove_kriging_outliers
   )
 }

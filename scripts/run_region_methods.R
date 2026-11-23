@@ -212,7 +212,10 @@ for (i in seq_along(methods)) {
       }
       result <- do.call(
         run_susie_rrss,
-        c(args, list(reference_sample_size = reference_sample_size))
+        c(args, list(
+          reference_sample_size = reference_sample_size,
+          remove_kriging_outliers = parse_bool(options$remove_kriging_outliers, default = FALSE)
+        ))
       )
     }
 

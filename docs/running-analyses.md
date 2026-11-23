@@ -135,7 +135,34 @@ sbatch scripts/finemap.sh \
   --slurm
 ```
 
-Each completed group writes `<outdir>/<group_study_id>/<group_id>/methods/multisusie.rda` (plus `{metadata,provenance,qc}.json` and `report.html`), which drops directly into `coloc::coloc.susie()` and `scripts/compare_pqtl_studies.R` alongside single-study runs.
+Each completed group writes `<outdir>/<group_study_id>/<group_id>/methods/multisusie.rda` (plus `{metadata,provenance,qc}.json` and `report.html`, including a per-cohort kriging & `s_hat` diagnostic table), which drops directly into `coloc::coloc.susie()` and `scripts/compare_pqtl_studies.R` alongside single-study runs.
+
+---
+
+## 2b. Kriging Diagnostics vs Opt-In Outlier Removal: When to Use for `X`, Why Off by Default for `Y`
+
+Every `susie-rrss` locus ($M \le 20{,}000$) and every `MultiSuSiE` cohort automatically computes **non-destructive leave-one-out kriging & `DENTIST` diagnostics** (`s_hat`, `KRIGING_EXP_Z`, `KRIGING_STD_RESID`, `KRIGING_LOGLR`, `KRIGING_OUTLIER`, `kriging_cs_outlier_count`) in $O(M^2)$ time by reusing the existing correlation eigendecomposition — **without removing any variants by default (`--remove-kriging-outliers false`)**.
+
+### Case `X` — When You SHOULD Enable `--remove-kriging-outliers true`
+
+Enable active kriging outlier removal when fine-mapping **legacy or heterogeneous complex-trait summary statistics at modest $|Z|$** where `report.html` Panel 3 (`Kriging Expected Z vs Observed Z`) or `qc.json` (`kriging_cs_outlier_regions > 0`) reveals isolated sign-reversed variants caused by upstream harmonisation artifacts (such as rsID-only strand flips or fixed-effect IVW meta-analyses with unrecorded cohort allele swaps):
+
+```bash
+# Case X: Re-run a legacy complex-trait meta-analysis dropping flipped kriging outliers
+# (Produces a distinct settings_hash so default runs in other studies are unaffected)
+bash scripts/finemap.sh \
+  --input-dir /path/to/GWASprocessing/GWAS/locke_2015_25673413/standardise/GWAScatalog_GCST002783 \
+  --ld-pop EUR \
+  --remove-kriging-outliers true
+```
+
+### Case `Y` — Why You Should NOT Enable `--remove-kriging-outliers` by Default (Especially for Proteins)
+
+Keep `--remove-kriging-outliers false` (the default) for **standardised biobank GWAS-VCFs, multi-causal loci, founder/admixed cohorts, and all protein `cis-pQTL` / `cis-eQTL` studies**:
+
+1. **Multi-causal `cis` loci (`MMP12`, `GDF15`):** An independent secondary causal variant with $z_2 = -6.5$ in modest positive LD ($r_{12} = +0.25$) with an extreme $+55$ primary lead has a positive leave-one-out expectation ($\hat{\mu}_2 > 0$) opposite to its true observed score ($z_2 < 0$), triggering `KRIGING_LOGLR > 2` even with exact alleles and in-sample LD. Active removal deletes genuine secondary causal signals before `SuSiE-rRSS` can jointly condition on the primary lead.
+2. **Coding PAVs & founder drift (`deCODE`):** Low-LD coding missense variants and founder-drifted haplotypes exhibit large conditional residuals; dropping them deletes the true causal variant rather than a harmonisation error.
+3. **Full diagnostic visibility with zero risk:** Leaving `--remove-kriging-outliers false` still flags any credible set containing a suspect variant via `kriging_cs_outlier_count`, `ld_mismatch_warning`, `qc.json`, and red `×` markers in `report.html` Panel 3. See the [Protein cis-pQTL Guide](protein-pqtl-example.md) and [LD-Mismatch & Kriging Diagnostics](diagnostics-and-kriging.md) for full details.
 
 ---
 
@@ -157,6 +184,7 @@ Each completed group writes `<outdir>/<group_study_id>/<group_id>/methods/multis
 | `--max-iter INT` | `100` | Max IBSS iterations for SuSiE methods on `lead_locus` and `mhc` regions |
 | `--cis-max-iter INT` | `200` | Max IBSS iterations for SuSiE methods on `cis_gene` windows (and `MultiSuSiE`) |
 | `--susie-refine` | `false` | Enable `susieR` multi-restart CS refinement (`refine = TRUE`) |
+| `--remove-kriging-outliers` | `false` | Opt-in active pre-fit removal of kriging sign-flip outliers (`KRIGING_LOGLR > 2` and `|z_adj| > 2`) in `susie-rrss` and `multisusie` (diagnostics are **always** recorded regardless of this flag) |
 | `--output-format FMT` | `rda` | Saved method file format: `rda`, `rds`, or `both` |
 | `--compress COMP` | `xz` | Compression for `.rda`/`.rds`: `xz` (~35% smaller) or `gzip` (faster write) |
 

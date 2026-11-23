@@ -119,12 +119,142 @@ test_that("SuSiE-rRSS keeps eb_mix active above eigen_max_variants while skippin
   expect_equal(res$diagnostics$r_mismatch_requested, "eb_mix")
   expect_equal(res$diagnostics$r_mismatch_effective, "eb_mix")
   expect_equal(res$diagnostics$q_art_eigen, "skipped_large_m")
+  expect_equal(res$diagnostics$kriging_status, "skipped_large_m")
+  expect_true(is.na(res$diagnostics$s_hat))
+  expect_true(all(is.na(res$variants$KRIGING_EXP_Z)))
+  expect_true(all(!res$variants$KRIGING_OUTLIER))
   expect_false(isTRUE(res$diagnostics$artifact_evaluable))
-  expect_true(all(c("prior_variance_V", "lbf", "ld_mismatch_warning") %in%
+  expect_true(all(c("prior_variance_V", "lbf", "ld_mismatch_warning",
+                    "kriging_outlier_count") %in%
                     names(res$credible_sets)))
   expect_true(all(c("initial_elbo", "final_elbo", "final_elbo_change",
                     "max_prior_variance_V", "max_lbf") %in%
                     names(res$diagnostics)))
+})
+
+test_that("compute_kriging_from_eigen matches susieR::estimate_s_rss and kriging_rss", {
+  set.seed(42)
+  n_sim <- 1500L
+  p_sim <- 150L
+  X <- matrix(stats::rnorm(n_sim * p_sim), nrow = n_sim, ncol = p_sim)
+  for (j in 2:6) {
+    X[, j] <- 0.88 * X[, 1] + sqrt(1 - 0.88^2) * stats::rnorm(n_sim)
+  }
+  X <- scale(X)
+  y <- scale(0.18 * X[, 1] + stats::rnorm(n_sim))[, 1]
+  R_sim <- stats::cor(X)
+  z_sim <- as.numeric(crossprod(X, y) / sqrt(n_sim - 1))
+  # Inject an upstream allele-switch flip on variant 3
+  z_sim[3] <- -z_sim[3]
+
+  s_ref <- susieR::estimate_s_rss(
+    z = z_sim, R = R_sim, n = n_sim, r_tol = 1e-8, method = "null-mle"
+  )
+  k_ref <- susieR::kriging_rss(
+    z = z_sim, R = R_sim, n = n_sim, r_tol = 1e-8, s = s_ref
+  )$plot$data
+
+  eig <- eigen(R_sim, symmetric = TRUE)
+  k_fast <- gwasfinemapping:::compute_kriging_from_eigen(
+    z = z_sim, n = n_sim, eig = eig, r_tol = 1e-8
+  )
+
+  expect_equal(k_fast$status, "computed")
+  expect_equal(k_fast$s_hat, as.numeric(s_ref), tolerance = 1e-6)
+  expect_equal(k_fast$condmean, as.numeric(k_ref$condmean), tolerance = 1e-6)
+  expect_equal(k_fast$condvar, as.numeric(k_ref$condvar), tolerance = 1e-6)
+  expect_equal(k_fast$z_std_diff, as.numeric(k_ref$z_std_diff), tolerance = 1e-6)
+  expect_equal(k_fast$logLR, as.numeric(k_ref$logLR), tolerance = 1e-4)
+  expect_true(k_fast$outlier[3])
+
+  # Pure-R EM mixture fallback produces valid simplex weights
+  w_em <- gwasfinemapping:::fit_kriging_mixture_em(matrix(c(-0.1, -2.0, -1.5, -0.2), nrow = 2))
+  expect_equal(sum(w_em), 1.0, tolerance = 1e-8)
+  expect_true(all(w_em >= 0))
+})
+
+test_that("SuSiE-rRSS records kriging diagnostics non-destructively by default and supports opt-in removal", {
+  set.seed(42)
+  n_eff <- 1500L
+  p <- 150L
+  X <- matrix(stats::rnorm(n_eff * p), nrow = n_eff, ncol = p)
+  for (j in 2:6) {
+    X[, j] <- 0.88 * X[, 1] + sqrt(1 - 0.88^2) * stats::rnorm(n_eff)
+  }
+  X <- scale(X)
+  y <- scale(0.18 * X[, 1] + stats::rnorm(n_eff))[, 1]
+  R <- stats::cor(X)
+  z <- as.numeric(crossprod(X, y) / sqrt(n_eff - 1))
+  z[3] <- -z[3]  # Simulated allele-switch flip on tightly correlated tag SNP 3
+
+  variants <- data.frame(
+    CHROM = rep("1", p),
+    POS = 1000:(1000 + p - 1L),
+    REF = rep("A", p),
+    ALT = rep("G", p),
+    EZ = z,
+    LP = pmax(-stats::pnorm(abs(z), lower.tail = FALSE, log.p = TRUE) / log(10) - log10(2), 0.1),
+    SS = rep(n_eff, p)
+  )
+  ids <- paste(variants$CHROM, variants$POS, variants$REF, variants$ALT, sep = ":")
+  dimnames(R) <- list(ids, ids)
+
+  # 1. Default: remove_kriging_outliers = FALSE keeps all variants and flags SNP 3
+  res_keep <- run_susie_rrss(
+    variants,
+    R,
+    reference_sample_size = 5000,
+    L = 3,
+    max_iter = 100
+  )
+  expect_false(res_keep$diagnostics$remove_kriging_outliers)
+  expect_equal(res_keep$diagnostics$kriging_status, "computed")
+  expect_equal(nrow(res_keep$variants), p)
+  expect_equal(res_keep$diagnostics$kriging_outliers_removed, 0L)
+  expect_true(res_keep$variants$KRIGING_OUTLIER[3])
+  expect_gte(res_keep$diagnostics$kriging_outlier_count, 1L)
+  expect_true(ids[3] %in% res_keep$diagnostics$kriging_outlier_gwas_variant_ids)
+  expect_true(all(c("KRIGING_EXP_Z", "KRIGING_STD_RESID", "KRIGING_LOGLR", "KRIGING_OUTLIER") %in%
+                    names(res_keep$variants)))
+
+  # 2. Pre-scaled XtX (ld_scale = n_eff - 1) produces identical kriging quantities
+  R_scaled <- R * (n_eff - 1)
+  attr(R_scaled, "ld_scale") <- n_eff - 1
+  res_scaled <- run_susie_rrss(
+    variants,
+    R_scaled,
+    reference_sample_size = 5000,
+    L = 3,
+    max_iter = 100
+  )
+  expect_equal(res_scaled$diagnostics$s_hat, res_keep$diagnostics$s_hat, tolerance = 1e-8)
+  expect_equal(res_scaled$variants$KRIGING_EXP_Z, res_keep$variants$KRIGING_EXP_Z, tolerance = 1e-8)
+  expect_equal(res_scaled$variants$KRIGING_STD_RESID, res_keep$variants$KRIGING_STD_RESID, tolerance = 1e-8)
+
+  # 3. Opt-in: remove_kriging_outliers = TRUE drops flagged outlier(s) and preserves coloc naming
+  res_drop <- run_susie_rrss(
+    variants,
+    R,
+    reference_sample_size = 5000,
+    L = 3,
+    max_iter = 100,
+    remove_kriging_outliers = TRUE
+  )
+  expect_true(res_drop$diagnostics$remove_kriging_outliers)
+  expect_gte(res_drop$diagnostics$kriging_outliers_removed, 1L)
+  expect_equal(nrow(res_drop$variants), p - res_drop$diagnostics$kriging_outliers_removed)
+  expect_false(ids[3] %in% res_drop$variants$GWAS_VARIANT_ID)
+  expect_equal(names(res_drop$fit$pip), res_drop$variants$GWAS_VARIANT_ID)
+
+  # 4. Fewer than 3 variants skips kriging cleanly
+  res_two <- run_susie_rrss(
+    variants[1:2, , drop = FALSE],
+    R[1:2, 1:2, drop = FALSE],
+    reference_sample_size = 5000,
+    L = 2,
+    max_iter = 30
+  )
+  expect_equal(res_two$diagnostics$kriging_status, "skipped_too_few_variants")
 })
 
 test_that("Two-tier CS validity gate suppresses non-converged and V > 1 blow-up credible sets", {

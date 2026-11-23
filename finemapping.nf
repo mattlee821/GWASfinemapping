@@ -67,6 +67,7 @@ process PREPARE_MANIFEST {
       --max-iter '${params.max_iter}' \\
       --cis-max-iter '${params.cis_max_iter}' \\
       --susie-refine '${params.susie_refine}' \\
+      --remove-kriging-outliers '${params.remove_kriging_outliers}' \\
       --row-limit '${params.row_limit}' \\
       --force '${params.force}' \\
       --dry-run '${params.dry_run}' \\
@@ -337,6 +338,7 @@ process PREPARE_MULTISUSIE {
       --max-causal '${params.max_causal}' \\
       --cis-max-iter '${params.cis_max_iter}' \\
       ${opt('--cis-significance-lp', params.cis_significance_lp)} \\
+      --remove-kriging-outliers '${params.remove_kriging_outliers}' \\
       --row-limit '${params.row_limit}' \\
       --force '${params.force}' \\
       --dry-run '${params.dry_run}' \\

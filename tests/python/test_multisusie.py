@@ -9,8 +9,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+from prepare_manifest import compute_settings_hash  # noqa: E402
 from run_finemapping import r_runtime_environment  # noqa: E402
 from run_multisusie import (  # noqa: E402
+    compute_kriging_qc_numpy,
     fit_multisusie_locus,
     load_multisusie_backend,
     save_multisusie_study_output,
@@ -146,6 +148,13 @@ class MultiSuSiEIntegrationTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(res.returncode, 0, res.stderr)
+            import json as _json
+            qc_ms = _json.loads((fmdir / "somascan_multisusie_3cohort" / "P04155_9185-15" / "qc.json").read_text(encoding="utf-8"))
+            self.assertIn("kriging_cs_outlier_regions", qc_ms)
+            self.assertIn("kriging_by_cohort", qc_ms["loci"][0]["multisusie"])
+            self.assertEqual(len(qc_ms["loci"][0]["multisusie"]["kriging_by_cohort"]), 3)
+            rep_html = (fmdir / "somascan_multisusie_3cohort" / "P04155_9185-15" / "report.html").read_text(encoding="utf-8")
+            self.assertIn("Per-Cohort LD-Mismatch &amp; Kriging Diagnostics", rep_html)
             import csv
             with (cmp_out / "02_pairwise_coloc_and_concordance.tsv").open(encoding="utf-8") as fh:
                 prows = list(csv.DictReader(fh, delimiter="\t"))
@@ -181,6 +190,45 @@ class MultiSuSiEIntegrationTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(out["pip"])))
         self.assertTrue(np.all(np.isfinite(out["lbf_variable"])))
         self.assertTrue(np.all(out["sigma2"] >= 1e-2))
+
+    def test_multisusie_kriging_diagnostics_opt_in_censoring_and_hash_parity(self):
+        rng = np.random.default_rng(77)
+        P = 150
+        n1, n2 = 1500, 1400
+        X1 = rng.standard_normal((n1, P))
+        X2 = rng.standard_normal((n2, P))
+        for j in range(1, 6):
+            X1[:, j] = 0.88 * X1[:, 0] + np.sqrt(1 - 0.88**2) * rng.standard_normal(n1)
+            X2[:, j] = 0.88 * X2[:, 0] + np.sqrt(1 - 0.88**2) * rng.standard_normal(n2)
+
+        y1 = 0.18 * X1[:, 0] + rng.standard_normal(n1)
+        y2 = 0.18 * X2[:, 0] + rng.standard_normal(n2)
+        y1 /= y1.std(ddof=1)
+        y2 /= y2.std(ddof=1)
+
+        b1, s1, R_eur, _ = _marginal_sumstats(X1, y1)
+        b2, s2, _, _ = _marginal_sumstats(X2, y2)
+        b2_flip = b2.copy()
+        b2_flip[2] = -b2_flip[2]
+
+        maf = np.full(P, 0.25)
+        cohorts = [
+            {"study_id": "clean_EUR", "ancestry": "EUR", "n": n1, "b": b1, "s": s1, "maf": maf},
+            {"study_id": "flipped_EUR", "ancestry": "EUR", "n": n2, "b": b2_flip, "s": s2, "maf": maf},
+        ]
+        out_keep = fit_multisusie_locus(cohorts, {"EUR": R_eur}, L=4, max_iter=100, remove_kriging_outliers=False)
+        d_keep = out_keep["diagnostics"]
+        self.assertFalse(d_keep["remove_kriging_outliers"])
+        self.assertEqual(d_keep["kriging_outliers_censored_total"], 0)
+        self.assertGreaterEqual(d_keep["kriging_outlier_count"], 1)
+        self.assertEqual(d_keep["kriging_by_cohort"][0]["kriging_outlier_count"], 0)
+        self.assertGreaterEqual(d_keep["kriging_by_cohort"][1]["kriging_outlier_count"], 1)
+
+        out_drop = fit_multisusie_locus(cohorts, {"EUR": R_eur}, L=4, max_iter=100, remove_kriging_outliers=True)
+        d_drop = out_drop["diagnostics"]
+        self.assertTrue(d_drop["remove_kriging_outliers"])
+        self.assertGreaterEqual(d_drop["kriging_outliers_censored_total"], 1)
+        self.assertEqual(d_drop["kriging_cs_outlier_count"], 0)
 
     def test_cli_prepare_run_group_and_idempotent_state_skip(self):
         import json
@@ -251,6 +299,73 @@ class MultiSuSiEIntegrationTests(unittest.TestCase):
             s_json2 = json.loads((logdir / "run_manifest_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(s_json2["rows_to_run"], 0)
             self.assertEqual(s_json2["rows_skipped_complete"], 1)
+
+
+class KrigingNumpyAndManifestHashTests(unittest.TestCase):
+    """Pure-NumPy / stdlib tests that run unconditionally even without MultiSuSiE installed."""
+
+    def test_numpy_kriging_outlier_detection_skip_paths_and_settings_hash_parity(self):
+        rng = np.random.default_rng(77)
+        P = 150
+        n1, n2 = 1500, 1400
+        X1 = rng.standard_normal((n1, P))
+        X2 = rng.standard_normal((n2, P))
+        for j in range(1, 6):
+            X1[:, j] = 0.88 * X1[:, 0] + np.sqrt(1 - 0.88**2) * rng.standard_normal(n1)
+            X2[:, j] = 0.88 * X2[:, 0] + np.sqrt(1 - 0.88**2) * rng.standard_normal(n2)
+
+        y1 = 0.18 * X1[:, 0] + rng.standard_normal(n1)
+        y2 = 0.18 * X2[:, 0] + rng.standard_normal(n2)
+        y1 /= y1.std(ddof=1)
+        y2 /= y2.std(ddof=1)
+
+        b1, s1, R_eur, _ = _marginal_sumstats(X1, y1)
+        b2, s2, _, _ = _marginal_sumstats(X2, y2)
+
+        krig_clean, eigh_cached = compute_kriging_qc_numpy(b1 / s1, R_eur, n1)
+        self.assertEqual(krig_clean["status"], "computed")
+        self.assertLess(krig_clean["s_hat"], 0.15)
+        self.assertEqual(int(np.sum(krig_clean["outlier"])), 0)
+
+        b2_flip = b2.copy()
+        b2_flip[2] = -b2_flip[2]
+        krig_flip, _ = compute_kriging_qc_numpy(b2_flip / s2, R_eur, n2, precomputed_eigh=eigh_cached)
+        self.assertEqual(krig_flip["status"], "computed")
+        self.assertTrue(bool(krig_flip["outlier"][2]))
+        self.assertGreater(float(krig_flip["logLR"][2]), 2.0)
+
+        # Skip paths (<3 variants and max_variants threshold)
+        krig_tiny, _ = compute_kriging_qc_numpy((b1 / s1)[:2], R_eur[:2, :2], n1)
+        self.assertEqual(krig_tiny["status"], "skipped_too_few_variants")
+        krig_big, _ = compute_kriging_qc_numpy(b1 / s1, R_eur, n1, max_variants=4)
+        self.assertEqual(krig_big["status"], "skipped_large_m")
+
+        # Verify prepare_manifest settings_hash backward compatibility when remove_kriging_outliers is False
+        with tempfile.NamedTemporaryFile() as tf:
+            row_stub = {"vcf": tf.name, "ld_population": "EUR", "gene_id": "P00001"}
+            base_params = {
+                "methods": ["susie_rrss"],
+                "output_format": "rda",
+                "significance_lp": 7.301029995664,
+                "cis_significance_lp": None,
+                "region_flank_bp": 1_500_000,
+                "max_region_width_bp": 9_500_000,
+                "gene_window_bp": 1_000_000,
+                "exclude_mhc": False,
+                "max_loci": 0,
+                "max_causal": 10,
+                "max_iter": 100,
+                "cis_max_iter": 200,
+                "min_maf": 0.01,
+                "susie_refine": False,
+                "effective_n": None,
+                "reference_sample_size": None,
+            }
+            h_legacy = compute_settings_hash(row_stub, base_params)
+            h_false = compute_settings_hash(row_stub, {**base_params, "remove_kriging_outliers": False})
+            h_true = compute_settings_hash(row_stub, {**base_params, "remove_kriging_outliers": True})
+            self.assertEqual(h_legacy, h_false)
+            self.assertNotEqual(h_false, h_true)
 
 
 if __name__ == "__main__":

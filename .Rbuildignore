@@ -27,6 +27,7 @@
 ^renv$
 ^\.Rprofile$
 ^\.pytest_cache$
+^\.vscode$
 ^tests/python$
 ^finemapping$
 ^manifests$

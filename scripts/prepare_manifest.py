@@ -399,6 +399,8 @@ def compute_settings_hash(row: dict[str, Any], params: dict[str, Any]) -> str:
         "effective_n": params.get("effective_n"),
         "reference_sample_size": params.get("reference_sample_size"),
     }
+    if bool(params.get("remove_kriging_outliers", False)):
+        payload["remove_kriging_outliers"] = True
     raw = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
@@ -518,6 +520,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         "max_iter": args.max_iter,
         "cis_max_iter": args.cis_max_iter,
         "susie_refine": args.susie_refine,
+        "remove_kriging_outliers": args.remove_kriging_outliers,
         "effective_n": args.effective_n,
         "reference_sample_size": args.reference_sample_size,
     }
@@ -837,6 +840,7 @@ def main() -> int:
     p_prep.add_argument("--max-iter", type=int, default=100)
     p_prep.add_argument("--cis-max-iter", type=int, default=200)
     p_prep.add_argument("--susie-refine", type=str2bool, default=False)
+    p_prep.add_argument("--remove-kriging-outliers", type=str2bool, default=False)
     p_prep.add_argument("--row-limit", type=int, default=0)
     p_prep.add_argument("--force", type=str2bool, default=False)
     p_prep.add_argument("--dry-run", type=str2bool, default=False)

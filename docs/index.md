@@ -45,10 +45,10 @@ All five single-study methods run by default (`--methods "p-ld susie-rss susie-r
 |---|---|---|---|---|
 | **Default** | `p-ld` | Deterministic greedy LD pruning ($r^2 < 0.1, 0.01, 0.001$) | Ultra-fast heuristic lead prioritisation (`--min-maf 0.01` prevents rare zero-$r^2$ inflation) | Heuristic sets only |
 | **Default** | `susie-rss` | Sum of Single Effects on summary stats (`susieR` 2.0.0) | C in-place $X^\top X$ scaling (`0` extra matrix copies), `L = 10`, purity $\ge 0.5$, 2-tier validity gate | Yes (`susie-rss.rda`) |
-| **Default** | `susie-rrss` | Mismatch- & finite-sample-aware SuSiE (`susieR` 2.0.0) | Exact Pan-UKB `R_finite` + always-on `eb_mix` at all $M$, `Q_art` diagnostics, 2-tier validity gate | **Yes — Primary Recommended** |
+| **Default** | `susie-rrss` | Mismatch- & finite-sample-aware SuSiE (`susieR` 2.0.0) | Exact Pan-UKB `R_finite` + always-on `eb_mix` at all $M$, zero-copy kriging & `DENTIST` QC, `Q_art`, 2-tier gate | **Yes — Primary Recommended** |
 | **Default** | `carma` | Shotgun stochastic search Spike-slab (`ZikunY/CARMA`) | C/LAPACK `dsyev` batch evaluator + Bayes-factor LD-outlier removal (`outlier.BF.index = 1/3.2`) | PIPs & CSs (`carma.rda`) |
 | **Default** | `polyfun` | Functionally informed SuSiE-RSS (`Weissbrod 2020`) | 19.48M UKB `baselineLF2.2` per-SNP heritability priors (`snpvar_meta`, $q = 100$ floor) | Yes (`polyfun.rda`) |
-| **Opt-in** | `multisusie` | Joint $K$-cohort / multi-ancestry SuSiE (`MultiSuSiE` 64-bit) | Per-cohort $N_k$ & ancestry-matched Pan-UKB LD, unconditionally SPD Woodbury LBF kernel + $\sigma^2 \ge 10^{-2}$ floor | **Yes (`multisusie.rda`)** |
+| **Opt-in** | `multisusie` | Joint $K$-cohort / multi-ancestry SuSiE (`MultiSuSiE` 64-bit) | Per-cohort $N_k$, ancestry-matched Pan-UKB LD, per-cohort kriging QC, SPD Woodbury LBF kernel + $\sigma^2 \ge 10^{-2}$ floor | **Yes (`multisusie.rda`)** |
 
 ---
 
@@ -96,7 +96,9 @@ sbatch scripts/finemap.sh \
 ## Documentation Map
 
 - **[Getting Started](getting-started.md):** Prerequisites, `.env` storage paths, local vs Apptainer/Docker installation, parallel SLURM reference data builds, test suite, and benchmarks.
-- **[Running Analyses & MultiSuSiE](running-analyses.md):** Complete CLI reference for single-VCF, `GWASprocessing` tree discovery, TSV manifests, opt-in `MultiSuSiE` workflows, SLURM scaling, and idempotent reruns.
+- **[Running Analyses & MultiSuSiE](running-analyses.md):** Complete CLI reference for single-VCF, `GWASprocessing` tree discovery, TSV manifests, opt-in `MultiSuSiE` workflows, when to enable `--remove-kriging-outliers` (`X` vs `Y`), SLURM scaling, and idempotent reruns.
+- **[Protein cis-pQTL Guide](protein-pqtl-example.md):** Worked proteogenomic examples explaining why active kriging outlier removal and `lambda = s_hat` shrinkage are **off by default** on high-$|Z|$ / multi-causal `cis-pQTLs` while non-destructive diagnostics are always recorded.
 - **[Outputs, Coloc & Interactive R](outputs-and-coloc.md):** Output file schemas, loading `.rda`/`.rds` containers in R, running `coloc::coloc.susie()` and `compare_pqtl_studies.R`, and interactive locus debugging in RStudio/Positron.
 - **[Statistical Methods & QC](methods.md):** Windowing rules, pericentromeric & WGS `_random` contig liftover guards, Pan-UKB LD orientation, two-tier `V <= 1.0` gating, `eb_mix`, `CARMA`, `PolyFun`, and the 64-bit SPD Woodbury `MultiSuSiE` solver.
+- **[LD-Mismatch & Kriging Diagnostics](diagnostics-and-kriging.md):** Mathematical reference and $O(M^2)$ implementation details for `s_hat`, leave-one-out `kriging_rss` (`logLR`), `DENTIST` residuals, `SuSiE-rRSS` `eb_mix`, per-cohort `MultiSuSiE` kriging summaries, and `report.html` Panel 3 interpretation.
 - **[28-Protein Cross-Platform & MultiSuSiE Study](sun_eur_vs_all_comparison_report.md):** Empirical results and visual comparisons for `Sun EUR` vs `Sun ALL`, SomaScan single cohorts, single-cohort vs `MultiSuSiE`, and Olink vs SomaScan across 28 CRC target proteins.

@@ -733,6 +733,8 @@ def run_locus_worker(args: argparse.Namespace) -> int:
             ]
             if row.get("susie_refine"):
                 m_cmd.extend(["--susie-refine", "true"])
+            if row.get("remove_kriging_outliers"):
+                m_cmd.extend(["--remove-kriging-outliers", "true"])
             if row.get("effective_n") is not None:
                 m_cmd.extend(["--effective-n", str(row["effective_n"])])
             if row.get("polyfun_dir"):
